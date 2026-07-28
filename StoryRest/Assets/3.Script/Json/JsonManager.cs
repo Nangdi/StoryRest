@@ -7,6 +7,8 @@ using UnityEngine;
 public class GameSettingData
 {
     public bool useUnityOnTop;
+    // 마우스 커서 표시 여부. false면 커서를 숨긴다(키오스크/전시용).
+    public bool showMouseCursor;
 }
 
 public class GameDynamicData

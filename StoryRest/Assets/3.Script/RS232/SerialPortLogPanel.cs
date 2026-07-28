@@ -22,6 +22,8 @@ public class SerialPortLogPanel : MonoBehaviour
     [Header("토글 (ESC 키로 표시/숨김)")]
     [SerializeField] private GameObject togglePanel;
     [SerializeField] private KeyCode toggleKey = KeyCode.Escape;
+    [Tooltip("시작할 때 로그 창을 숨긴 상태로 둘지 여부.")]
+    [SerializeField] private bool hideOnStart = true;
 
     [Header("동작 설정")]
     [SerializeField] private int maxLogLines = 200;
@@ -42,6 +44,9 @@ public class SerialPortLogPanel : MonoBehaviour
         if (clearButton != null) clearButton.onClick.AddListener(ClearLog);
         TrySubscribe();
         RefreshAllStatus();
+
+        if (hideOnStart && togglePanel != null)
+            togglePanel.SetActive(false);
     }
 
     private void Update()

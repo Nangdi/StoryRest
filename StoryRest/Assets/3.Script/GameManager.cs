@@ -22,7 +22,9 @@ public class GameManager : MonoBehaviour
     }
     private void OnDisable()
     {
-        GameTimer.Instance.OnTimeOver -= GameManager_OnGameEnd;
+        // 도메인 리로드/종료 시점엔 GameTimer가 먼저 파괴돼 Instance가 null일 수 있다.
+        if (GameTimer.Instance != null)
+            GameTimer.Instance.OnTimeOver -= GameManager_OnGameEnd;
     }
     void Start()
     {
