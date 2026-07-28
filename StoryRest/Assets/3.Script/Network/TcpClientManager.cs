@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using UnityEngine;
 
-// 메인 서버(EcoLolong_ServerEarthSystem 등)에 접속하는 TCP 클라이언트 매니저.
+// 메인 서버에 접속하는 TCP 클라이언트 매니저.
 // JsonManager.tcpJson 설정을 읽어 TcpClientChannel을 생성하고,
 // 백그라운드에서 받은 메시지를 메인 스레드에서 이벤트로 다시 쏴준다.
 public class TcpClientManager : MonoBehaviour
@@ -26,7 +26,7 @@ public class TcpClientManager : MonoBehaviour
     [Header("키보드 테스트")]
     [SerializeField] private bool enableKeyboardTest = true;
     [SerializeField] private KeyCode sendTestMessageKey = KeyCode.T;
-    [SerializeField] private string testMessage = "화력:1;탄소:1";
+    [SerializeField] private string testMessage = "test";
 
     // 백그라운드 스레드에서 받은 메시지를 메인 스레드에서 처리하기 위한 큐.
     private readonly ConcurrentQueue<string> receivedQueue = new ConcurrentQueue<string>();

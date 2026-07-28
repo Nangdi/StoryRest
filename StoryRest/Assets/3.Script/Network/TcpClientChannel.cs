@@ -8,6 +8,7 @@ using UnityEngine;
 
 // 메인 서버에 접속하는 단일 TCP 클라이언트 채널.
 // 연결/재연결, 줄 단위 수신, 송신을 담당한다.
+// 프로젝트별 메시지 처리는 MessageReceived 이벤트를 구독해서 구현한다.
 public class TcpClientChannel
 {
     private const int IdlePollDelayMs = 10;

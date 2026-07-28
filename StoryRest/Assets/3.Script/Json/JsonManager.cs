@@ -40,7 +40,7 @@ public class PortJson
 [Serializable]
 public class TcpJson
 {
-    // 메인 서버(EcoLolong_ServerEarthSystem 등) 접속 주소와 포트
+    // 메인 서버 접속 주소와 포트
     public string host = "127.0.0.1";
     public int port = 5000;
     // 끊겼을 때 재시도 간격(초). 0 이하이면 재연결 시도하지 않음.
