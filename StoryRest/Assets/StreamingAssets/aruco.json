@@ -1,0 +1,59 @@
+{
+    "dictionaryId": 0,
+    "smoothing": 0.4000000059604645,
+    "holdSeconds": 0.30000001192092898,
+    "warpSubdivisions": 10,
+    "perspectiveMapping": true,
+    "maxSimultaneous": 0,
+    "maxConcurrentVideos": 4,
+    "calibrationMarkerIds": [
+        46,
+        47,
+        48,
+        49
+    ],
+    "editorPreview": false,
+    "debugPreviewContent": false,
+    "adjustPositionStep": 0.019999999552965165,
+    "adjustScaleStep": 0.019999999552965165,
+    "adjustRotationStep": 1.0,
+    "sets": [
+        {
+            "name": "A",
+            "displayIndex": 0,
+            "camera": {
+                "deviceId": 0,
+                "backend": 0,
+                "width": 1280,
+                "height": 720,
+                "fps": 30,
+                "flipHorizontal": false,
+                "flipVertical": false
+            },
+            "calibration": {
+                "projectorPoints": [
+                    {
+                        "x": 0.15000000596046449,
+                        "y": 0.15000000596046449
+                    },
+                    {
+                        "x": 0.8500000238418579,
+                        "y": 0.15000000596046449
+                    },
+                    {
+                        "x": 0.8500000238418579,
+                        "y": 0.8500000238418579
+                    },
+                    {
+                        "x": 0.15000000596046449,
+                        "y": 0.8500000238418579
+                    }
+                ],
+                "cameraPoints": [],
+                "valid": false
+            },
+            "globalScale": 1.0,
+            "markers": []
+        }
+    ]
+}
