@@ -73,3 +73,23 @@ crashlytics-build.properties
 # Temporary auto-generated Android Assets
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 에셋스토어 유료 에셋 — 저장소에 포함하지 않는다.
+#
+# 재배포가 라이선스 위반이기도 하고, 용량이 커서 그대로는 push 조차 되지 않는다.
+# (OpenCV for Unity 2.9GB, 그중 WebGL 플러그인만 2GB. 100MB 넘는 파일이 16개다.)
+#
+# 새 작업 PC 를 세팅할 때는 에셋스토어에서 직접 임포트한다. 자세한 안내는 docs/SETUP.md.
+# ─────────────────────────────────────────────────────────────────────────────
+/[Aa]ssets/OpenCVForUnity/
+/[Aa]ssets/OpenCVForUnity.meta
+/[Aa]ssets/AVProVideo/
+/[Aa]ssets/AVProVideo.meta
+
+# 편집모드에서 찍은 확인용 스크린샷
+/[Aa]ssets/[Ss]creenshots/
+/[Aa]ssets/[Ss]creenshots.meta
+
+# 현장에서 넣는 콘텐츠 영상. 설정 파일과 안내문만 버전 관리한다.
+/[Aa]ssets/[Ss]treamingAssets/floor_*/*/
