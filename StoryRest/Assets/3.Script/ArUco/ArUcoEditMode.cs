@@ -1,0 +1,711 @@
+using System.Collections.Generic;
+using System.Text;
+using UnityEngine;
+
+namespace StoryRest.ArUco
+{
+    /// <summary>
+    /// 현장에서 값을 맞추는 편집모드. 실행 중인 전시 화면 위에서 조정하고 파일로 남긴다.
+    ///
+    /// 두 가지를 잡는다.
+    ///  - **코너 보정**: 카메라 픽셀 → 프로젝터 좌표 변환(→ ARCHITECTURE §1). 설치 시 1회.
+    ///  - **마커 배치**: 마커별 위치·크기·회전. 콘텐츠를 추가할 때마다.
+    ///
+    /// 세트가 여럿이면 하나를 골라 조정한다. HUD 는 그 세트의 화면에만 뜨고
+    /// 나머지 프로젝터는 전시 상태를 유지한다.
+    ///
+    /// 전시장 PC 는 예고 없이 꺼지므로 값이 바뀌면 곧바로 저장한다(무입력 1.5초 + Enter 즉시).
+    /// </summary>
+    [DisallowMultipleComponent]
+    public class ArUcoEditMode : MonoBehaviour
+    {
+        enum Stage
+        {
+            Placement,      // 마커별 배치 조정
+            Calibration,    // 카메라↔프로젝터 코너 보정
+        }
+
+        enum CalibrationPhase
+        {
+            Idle,           // 안내만 표시
+            Auto,           // 마커를 투사하고 카메라가 읽기를 기다린다
+            Manual,         // 조준점을 하나씩 짚어 나간다
+            Verify,         // 구한 변환으로 다시 쏴서 눈으로 확인
+        }
+
+        [Header("키")]
+        [SerializeField] KeyCode toggleKey = KeyCode.F1;
+        [SerializeField] KeyCode stageKey = KeyCode.F2;
+        [SerializeField] KeyCode nextMarkerKey = KeyCode.Tab;
+        [SerializeField] KeyCode resetMarkerKey = KeyCode.Backspace;
+        [SerializeField] KeyCode reloadContentKey = KeyCode.F5;
+        [SerializeField] KeyCode outlineKey = KeyCode.D;
+        [SerializeField] KeyCode cameraPreviewKey = KeyCode.C;
+        [SerializeField] KeyCode perspectiveKey = KeyCode.P;
+        [SerializeField] KeyCode actionKey = KeyCode.Space;
+        // GameManager 가 S 를 쓰고 SettingsPanelUI 가 Esc 를 쓰므로 겹치지 않게 Enter 로 둔다.
+        [SerializeField] KeyCode saveKey = KeyCode.Return;
+
+        [Header("반복 입력")]
+        [SerializeField] float repeatDelay = 0.35f;
+        [SerializeField] float repeatRate = 14f;
+        [SerializeField] float fineMultiplier = 0.2f;
+
+        [Header("저장")]
+        [SerializeField] float autoSaveDelay = 1.5f;
+
+        [Header("캘리브레이션")]
+        [Tooltip("자동 인식에서 몇 프레임을 모아 평균낼지. 마커가 미세하게 떨리므로 여러 장을 겹친다.")]
+        [SerializeField] int autoSampleFrames = 30;
+        [Tooltip("투사할 마커의 화면상 크기(짧은 변 기준 비율).")]
+        [SerializeField] float calibrationMarkerSize = 0.18f;
+
+        StoryRestApp _app;
+
+        bool _active;
+        bool _cursorWasVisible;
+
+        int _setIndex;
+        Stage _stage = Stage.Placement;
+        int _selectedMarkerId = -1;
+
+        CalibrationPhase _phase = CalibrationPhase.Idle;
+        int _manualIndex;
+        int _autoFrames;
+        readonly Vector2[] _accum = new Vector2[4];
+        readonly int[] _accumCount = new int[4];
+        readonly Vector2[] _collected = new Vector2[4];
+        readonly bool[] _collectedOk = new bool[4];
+        string _calibrationMessage = "";
+
+        bool _dirty;
+        float _dirtySince;
+
+        readonly Dictionary<KeyCode, float> _holdTimes = new Dictionary<KeyCode, float>();
+        readonly StringBuilder _builder = new StringBuilder(1024);
+
+        Texture2D _crosshair;
+
+        public bool IsActive => _active;
+
+        void Awake()
+        {
+            _app = GetComponent<StoryRestApp>();
+        }
+
+        void OnDestroy()
+        {
+            if (_crosshair != null) Destroy(_crosshair);
+        }
+
+        ArUcoSet CurrentSet
+        {
+            get
+            {
+                if (_app == null || _app.Sets.Count == 0) return null;
+                _setIndex = Mathf.Clamp(_setIndex, 0, _app.Sets.Count - 1);
+                return _app.Sets[_setIndex];
+            }
+        }
+
+        // Set.Update 가 화면을 채운 뒤에 그 위로 편집 UI 를 얹는다.
+        void LateUpdate()
+        {
+            if (Input.GetKeyDown(toggleKey)) SetActive(!_active);
+
+            if (!_active)
+            {
+                FlushIfDirty(false);
+                return;
+            }
+
+            var set = CurrentSet;
+            if (set == null || set.View == null || _app.Config == null) return;
+
+            HandleSetSelection();
+            HandleStageSwitch(set);
+            HandleCommonKeys(set);
+
+            if (_stage == Stage.Placement) UpdatePlacement(set);
+            else UpdateCalibration(set);
+
+            UpdateHud(set);
+            FlushIfDirty(false);
+        }
+
+        void SetActive(bool active)
+        {
+            _active = active;
+
+            if (active)
+            {
+                // 커서를 숨겨 둔 키오스크 상태라도 편집 중에는 창을 다룰 수 있어야 한다.
+                _cursorWasVisible = Cursor.visible;
+                Cursor.visible = true;
+            }
+            else
+            {
+                FlushIfDirty(true);
+                Cursor.visible = _cursorWasVisible;
+                _phase = CalibrationPhase.Idle;
+            }
+
+            // 편집을 벗어나면 전시 상태로 되돌린다. 어떤 편집 UI 도 남으면 안 된다.
+            foreach (var s in _app.Sets)
+            {
+                s.SuppressContent = false;
+                s.CameraPreviewEnabled = false;
+                s.HighlightMarkerId = -1;
+                s.View.ShowHud(null);
+                s.View.BeginOverlay();
+                s.View.EndOverlay();
+                s.Tracker.DrawDetectedMarkers = false;
+            }
+        }
+
+        void HandleSetSelection()
+        {
+            for (int i = 0; i < _app.Sets.Count && i < 9; i++)
+            {
+                if (!Input.GetKeyDown(KeyCode.Alpha1 + i)) continue;
+                if (i == _setIndex) continue;
+
+                // 세트를 옮기기 전에 이전 세트의 편집 흔적을 지운다.
+                var previous = CurrentSet;
+                if (previous != null)
+                {
+                    previous.SuppressContent = false;
+                    previous.CameraPreviewEnabled = false;
+                    previous.HighlightMarkerId = -1;
+                    previous.View.ShowHud(null);
+                    previous.View.BeginOverlay();
+                    previous.View.EndOverlay();
+                }
+
+                _setIndex = i;
+                _selectedMarkerId = -1;
+                _phase = CalibrationPhase.Idle;
+            }
+        }
+
+        void HandleStageSwitch(ArUcoSet set)
+        {
+            if (!Input.GetKeyDown(stageKey)) return;
+
+            _stage = _stage == Stage.Placement ? Stage.Calibration : Stage.Placement;
+            _phase = CalibrationPhase.Idle;
+
+            set.SuppressContent = _stage == Stage.Calibration;
+
+            if (_stage == Stage.Placement)
+            {
+                set.View.BeginOverlay();
+                set.View.EndOverlay();
+            }
+        }
+
+        void HandleCommonKeys(ArUcoSet set)
+        {
+            if (Input.GetKeyDown(cameraPreviewKey))
+                set.CameraPreviewEnabled = !set.CameraPreviewEnabled;
+
+            if (Input.GetKeyDown(outlineKey))
+                set.Tracker.DrawDetectedMarkers = !set.Tracker.DrawDetectedMarkers;
+
+            if (Input.GetKeyDown(reloadContentKey))
+                _app.ReloadContent();
+
+            if (Input.GetKeyDown(saveKey))
+                FlushIfDirty(true);
+        }
+
+        // ── 마커 배치 ────────────────────────────────────────────────────────────
+
+        void UpdatePlacement(ArUcoSet set)
+        {
+            if (Input.GetKeyDown(nextMarkerKey)) SelectNextMarker(set, IsShiftHeld() ? -1 : 1);
+
+            set.HighlightMarkerId = _selectedMarkerId;
+
+            if (Input.GetKeyDown(perspectiveKey))
+            {
+                _app.Config.perspectiveMapping = !_app.Config.perspectiveMapping;
+                MarkDirty();
+            }
+
+            if (Input.GetKeyDown(resetMarkerKey) && _selectedMarkerId >= 0)
+            {
+                set.Config.GetOrCreate(_selectedMarkerId).ResetPlacement();
+                MarkDirty();
+            }
+
+            if (_selectedMarkerId < 0) return;
+
+            var marker = set.Config.GetOrCreate(_selectedMarkerId);
+            var config = _app.Config;
+            float fine = IsShiftHeld() ? fineMultiplier : 1f;
+
+            float dx = (KeyStep(KeyCode.RightArrow) - KeyStep(KeyCode.LeftArrow)) * config.adjustPositionStep * fine;
+            float dy = (KeyStep(KeyCode.UpArrow) - KeyStep(KeyCode.DownArrow)) * config.adjustPositionStep * fine;
+
+            float grow = KeyStep(KeyCode.Equals) + KeyStep(KeyCode.Plus) + KeyStep(KeyCode.KeypadPlus);
+            float shrink = KeyStep(KeyCode.Minus) + KeyStep(KeyCode.KeypadMinus);
+            float ds = (grow - shrink) * config.adjustScaleStep * fine;
+
+            float dr = (KeyStep(KeyCode.RightBracket) - KeyStep(KeyCode.LeftBracket)) * config.adjustRotationStep * fine;
+            float dGlobal = (KeyStep(KeyCode.PageUp) - KeyStep(KeyCode.PageDown)) * config.adjustScaleStep * fine;
+
+            if (dx == 0f && dy == 0f && ds == 0f && dr == 0f && dGlobal == 0f) return;
+
+            marker.offsetX += dx;
+            marker.offsetY += dy;
+            marker.scale = Mathf.Max(0.05f, marker.scale + ds);
+            marker.rotationOffset = Mathf.Repeat(marker.rotationOffset + dr + 180f, 360f) - 180f;
+            set.Config.globalScale = Mathf.Max(0.05f, set.Config.globalScale + dGlobal);
+
+            MarkDirty();
+        }
+
+        void SelectNextMarker(ArUcoSet set, int direction)
+        {
+            var visible = set.VisibleMarkerIds;
+            if (visible.Count == 0) return;
+
+            int index = IndexOf(visible, _selectedMarkerId);
+            index = index < 0
+                ? (direction > 0 ? 0 : visible.Count - 1)
+                : ((index + direction) % visible.Count + visible.Count) % visible.Count;
+
+            _selectedMarkerId = visible[index];
+        }
+
+        // ── 코너 보정 ────────────────────────────────────────────────────────────
+
+        void UpdateCalibration(ArUcoSet set)
+        {
+            set.SuppressContent = true;
+
+            var calibration = set.Config.calibration;
+            var projectorPoints = calibration.projectorPoints;
+
+            if (projectorPoints == null || projectorPoints.Length != 4)
+            {
+                calibration.Reset();
+                projectorPoints = calibration.projectorPoints;
+            }
+
+            if (Input.GetKeyDown(actionKey)) AdvanceCalibration(set);
+
+            if (Input.GetKeyDown(resetMarkerKey))
+            {
+                calibration.Reset();
+                set.RebuildProjection();
+                _phase = CalibrationPhase.Idle;
+                _calibrationMessage = "보정값을 지웠습니다.";
+                MarkDirty();
+            }
+
+            switch (_phase)
+            {
+                case CalibrationPhase.Auto: CollectAuto(set, projectorPoints); break;
+                case CalibrationPhase.Manual: CollectManual(set); break;
+            }
+
+            DrawCalibrationOverlay(set, projectorPoints);
+        }
+
+        void AdvanceCalibration(ArUcoSet set)
+        {
+            switch (_phase)
+            {
+                case CalibrationPhase.Idle:
+                    BeginAuto();
+                    break;
+
+                case CalibrationPhase.Auto:
+                    // 자동이 안 잡히면 사람이 짚는 방식으로 넘어간다.
+                    BeginManual();
+                    break;
+
+                case CalibrationPhase.Manual:
+                    ConfirmManualPoint(set);
+                    break;
+
+                case CalibrationPhase.Verify:
+                    _phase = CalibrationPhase.Idle;
+                    _calibrationMessage = "보정을 마쳤습니다.";
+                    break;
+            }
+        }
+
+        void BeginAuto()
+        {
+            _phase = CalibrationPhase.Auto;
+            _autoFrames = 0;
+
+            for (int i = 0; i < 4; i++)
+            {
+                _accum[i] = Vector2.zero;
+                _accumCount[i] = 0;
+                _collectedOk[i] = false;
+            }
+
+            _calibrationMessage = "네 귀퉁이에 마커를 투사하고 있습니다. 카메라가 읽을 때까지 기다리세요.";
+        }
+
+        void BeginManual()
+        {
+            _phase = CalibrationPhase.Manual;
+            _manualIndex = 0;
+
+            for (int i = 0; i < 4; i++) _collectedOk[i] = false;
+
+            _calibrationMessage = "조준점 자리에 마커를 놓고 Space 를 누르세요.";
+        }
+
+        /// <summary>
+        /// 투사된 캘리브레이션 마커를 카메라가 읽어 대응점을 모은다.
+        /// 마커가 미세하게 떨리므로 여러 프레임을 평균낸다.
+        /// </summary>
+        void CollectAuto(ArUcoSet set, Vector2[] projectorPoints)
+        {
+            var ids = _app.Config.calibrationMarkerIds;
+            if (ids == null || ids.Length < 4)
+            {
+                _calibrationMessage = "calibrationMarkerIds 에 마커 ID 4개가 필요합니다.";
+                _phase = CalibrationPhase.Idle;
+                return;
+            }
+
+            var markers = set.Tracker.Markers;
+
+            for (int corner = 0; corner < 4; corner++)
+            {
+                for (int m = 0; m < markers.Count; m++)
+                {
+                    if (markers[m].id != ids[corner]) continue;
+
+                    _accum[corner] += markers[m].center;
+                    _accumCount[corner]++;
+                    break;
+                }
+            }
+
+            _autoFrames++;
+            if (_autoFrames < autoSampleFrames) return;
+
+            int found = 0;
+            for (int i = 0; i < 4; i++)
+            {
+                if (_accumCount[i] <= 0) continue;
+
+                _collected[i] = _accum[i] / _accumCount[i];
+                _collectedOk[i] = true;
+                found++;
+            }
+
+            if (found == 4)
+            {
+                ApplyCalibration(set, projectorPoints);
+                return;
+            }
+
+            _calibrationMessage =
+                $"자동 인식 실패 — {found}/4 개만 읽혔습니다.\n" +
+                "투사면이 어둡거나 초점이 맞지 않으면 인식되지 않습니다.\n" +
+                "Space 를 누르면 손으로 짚는 방식으로 넘어갑니다.";
+        }
+
+        /// <summary>수동 모드: 조준점 자리에 놓인 마커를 읽는다. 어떤 ID 든 상관없다.</summary>
+        void CollectManual(ArUcoSet set)
+        {
+            var markers = set.Tracker.Markers;
+            if (markers.Count == 0)
+            {
+                _calibrationMessage = $"{_manualIndex + 1}/4 — 조준점 자리에 마커를 놓으세요. (마커가 보이지 않습니다)";
+                return;
+            }
+
+            // 화면상 가장 크게 잡힌 것을 쓴다(Tracker 가 크기 내림차순으로 정렬해 둔다).
+            _calibrationMessage = $"{_manualIndex + 1}/4 — 마커가 보입니다. 자리가 맞으면 Space 를 누르세요.";
+        }
+
+        void ConfirmManualPoint(ArUcoSet set)
+        {
+            var markers = set.Tracker.Markers;
+            if (markers.Count == 0)
+            {
+                _calibrationMessage = "마커가 보이지 않습니다.";
+                return;
+            }
+
+            _collected[_manualIndex] = markers[0].center;
+            _collectedOk[_manualIndex] = true;
+            _manualIndex++;
+
+            if (_manualIndex < 4)
+            {
+                _calibrationMessage = $"{_manualIndex + 1}/4 — 다음 조준점으로 마커를 옮기세요.";
+                return;
+            }
+
+            ApplyCalibration(set, set.Config.calibration.projectorPoints);
+        }
+
+        void ApplyCalibration(ArUcoSet set, Vector2[] projectorPoints)
+        {
+            var calibration = set.Config.calibration;
+
+            calibration.projectorPoints = projectorPoints;
+            calibration.cameraPoints = new[] { _collected[0], _collected[1], _collected[2], _collected[3] };
+            calibration.valid = true;
+
+            set.RebuildProjection();
+            MarkDirty();
+
+            _phase = CalibrationPhase.Verify;
+            _calibrationMessage =
+                "보정을 적용했습니다. 조준점과 실제 투사 위치가 겹치는지 확인하세요.\n" +
+                "어긋나면 Backspace 로 지우고 다시 잡습니다. 맞으면 Space.";
+        }
+
+        void DrawCalibrationOverlay(ArUcoSet set, Vector2[] projectorPoints)
+        {
+            var view = set.View;
+            view.BeginOverlay();
+
+            var ids = _app.Config.calibrationMarkerIds;
+
+            for (int i = 0; i < 4; i++)
+            {
+                switch (_phase)
+                {
+                    case CalibrationPhase.Auto:
+                        // 프로젝터가 마커를 직접 쏜다. 카메라는 이 빛을 읽는다.
+                        if (ids != null && ids.Length > i)
+                        {
+                            var texture = ArUcoMarkerTexture.Get(_app.Config.dictionaryId, ids[i]);
+                            view.DrawOverlay(projectorPoints[i], calibrationMarkerSize, texture, Color.white);
+                        }
+                        break;
+
+                    case CalibrationPhase.Manual:
+                        // 지금 짚어야 할 점만 밝게, 나머지는 흐리게.
+                        bool current = i == _manualIndex;
+                        Color tint = _collectedOk[i]
+                            ? new Color(0.3f, 1f, 0.4f, 0.9f)
+                            : (current ? Color.white : new Color(1f, 1f, 1f, 0.25f));
+                        view.DrawOverlay(projectorPoints[i], current ? 0.05f : 0.03f, Crosshair(), tint);
+                        break;
+
+                    default:
+                        view.DrawOverlay(projectorPoints[i], 0.04f, Crosshair(), new Color(1f, 0.85f, 0.2f, 0.9f));
+                        break;
+                }
+            }
+
+            view.EndOverlay();
+        }
+
+        // 조준점. 가운데가 비어 있어야 마커를 정확히 겹칠 수 있다.
+        Texture2D Crosshair()
+        {
+            if (_crosshair != null) return _crosshair;
+
+            const int size = 64;
+            const int thickness = 4;
+            const int gap = 10;
+
+            _crosshair = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            _crosshair.filterMode = FilterMode.Bilinear;
+            _crosshair.wrapMode = TextureWrapMode.Clamp;
+
+            var pixels = new Color32[size * size];
+            int center = size / 2;
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    bool onVertical = Mathf.Abs(x - center) < thickness && Mathf.Abs(y - center) >= gap;
+                    bool onHorizontal = Mathf.Abs(y - center) < thickness && Mathf.Abs(x - center) >= gap;
+                    bool visible = onVertical || onHorizontal;
+
+                    pixels[y * size + x] = visible ? new Color32(255, 255, 255, 255) : new Color32(255, 255, 255, 0);
+                }
+            }
+
+            _crosshair.SetPixels32(pixels);
+            _crosshair.Apply();
+            return _crosshair;
+        }
+
+        // ── 저장 ─────────────────────────────────────────────────────────────────
+
+        void MarkDirty()
+        {
+            _dirty = true;
+            _dirtySince = Time.unscaledTime;
+        }
+
+        void FlushIfDirty(bool force)
+        {
+            if (!_dirty) return;
+            if (!force && Time.unscaledTime - _dirtySince < autoSaveDelay) return;
+
+            _app.SaveConfig();
+            _dirty = false;
+        }
+
+        // ── HUD ──────────────────────────────────────────────────────────────────
+
+        void UpdateHud(ArUcoSet set)
+        {
+            _builder.Clear();
+            _builder.AppendLine("<color=#ffd633><b>편집모드</b></color>   <color=#888888>F1 나가기 · F2 단계</color>");
+
+            AppendSetLine();
+            _builder.AppendLine();
+
+            if (_stage == Stage.Placement) AppendPlacement(set);
+            else AppendCalibration(set);
+
+            _builder.AppendLine();
+            _builder.AppendLine($"<color=#888888>{cameraPreviewKey} 카메라영상 {(set.CameraPreviewEnabled ? "끄기" : "켜기")}" +
+                                $" · {outlineKey} 마커테두리 · {reloadContentKey} 콘텐츠 다시읽기</color>");
+
+            var visible = set.VisibleMarkerIds;
+            _builder.Append(visible.Count > 0
+                ? $"<color=#88ff88>보이는 마커: {string.Join(", ", visible)}</color>"
+                : $"<color=#ff8888>마커가 보이지 않습니다 (후보 {set.Tracker.RejectedCount}개)</color>");
+
+            if (_dirty) _builder.Append("   <color=#ffd633>* 저장 대기</color>");
+
+            // 코너 보정 중에는 네 귀퉁이 조준점을 가리지 않도록 안내판을 가운데로 옮긴다.
+            set.View.ShowHud(_builder.ToString(), _stage == Stage.Calibration);
+
+            // 다른 세트에는 편집 UI 가 남지 않게 한다.
+            for (int i = 0; i < _app.Sets.Count; i++)
+            {
+                if (i != _setIndex) _app.Sets[i].View.ShowHud(null);
+            }
+        }
+
+        void AppendSetLine()
+        {
+            if (_app.Sets.Count <= 1)
+            {
+                _builder.AppendLine($"세트 <b>{CurrentSet.Config.name}</b>");
+                return;
+            }
+
+            _builder.Append("세트 ");
+            for (int i = 0; i < _app.Sets.Count; i++)
+            {
+                string name = _app.Sets[i].Config.name;
+                _builder.Append(i == _setIndex
+                    ? $"<color=#ffd633><b>[{i + 1}:{name}]</b></color> "
+                    : $"<color=#888888>{i + 1}:{name}</color> ");
+            }
+            _builder.AppendLine("  <color=#888888>숫자키로 전환</color>");
+        }
+
+        void AppendPlacement(ArUcoSet set)
+        {
+            _builder.AppendLine("<b>마커 배치</b>");
+
+            if (_selectedMarkerId < 0)
+            {
+                _builder.AppendLine("카메라에 마커를 비춘 뒤 Tab 으로 고르세요.");
+            }
+            else
+            {
+                var marker = set.Config.GetOrCreate(_selectedMarkerId);
+                bool onScreen = IndexOf(set.VisibleMarkerIds, _selectedMarkerId) >= 0;
+
+                _builder.AppendLine($"선택  <b>{_selectedMarkerId}번</b>" +
+                                    $"{(onScreen ? "" : "  <color=#ff8888>(화면에 없음)</color>")}   <color=#888888>Tab 다음</color>");
+                _builder.AppendLine($"크기  <b>{marker.scale:0.00}</b>   <color=#888888>+ / -</color>");
+                _builder.AppendLine($"좌우  <b>{marker.offsetX:+0.00;-0.00; 0.00}</b>   <color=#888888>← / →</color>");
+                _builder.AppendLine($"상하  <b>{marker.offsetY:+0.00;-0.00; 0.00}</b>   <color=#888888>↑ / ↓</color>");
+                _builder.AppendLine($"회전  <b>{marker.rotationOffset:+0.0;-0.0; 0.0}°</b>   <color=#888888>[ / ]</color>");
+            }
+
+            _builder.AppendLine($"전체배율  <b>{set.Config.globalScale:0.00}</b>   <color=#888888>PageUp / PageDown</color>");
+            _builder.AppendLine($"원근  <b>{(_app.Config.perspectiveMapping ? "켜짐" : "꺼짐")}</b>   <color=#888888>{perspectiveKey}</color>");
+            _builder.AppendLine($"<color=#888888>Shift 병행 미세조정 · {resetMarkerKey} 이 마커 초기화 · {saveKey} 즉시저장</color>");
+        }
+
+        void AppendCalibration(ArUcoSet set)
+        {
+            bool calibrated = set.Config.calibration.IsUsable;
+
+            _builder.AppendLine($"<b>코너 보정</b>   " +
+                                (calibrated ? "<color=#88ff88>보정됨</color>" : "<color=#ff8888>보정 안 됨</color>"));
+
+            switch (_phase)
+            {
+                case CalibrationPhase.Idle:
+                    _builder.AppendLine("카메라가 본 자리를 프로젝터 좌표로 옮기는 표를 만듭니다.");
+                    _builder.AppendLine("<color=#888888>Space — 네 귀퉁이에 마커를 투사해 자동으로 잡습니다</color>");
+                    break;
+
+                case CalibrationPhase.Auto:
+                    int progress = Mathf.Min(_autoFrames, autoSampleFrames);
+                    _builder.AppendLine($"자동 인식 중… {progress}/{autoSampleFrames}");
+                    break;
+
+                case CalibrationPhase.Manual:
+                    _builder.AppendLine($"수동 보정  <b>{Mathf.Min(_manualIndex + 1, 4)}/4</b>");
+                    break;
+
+                case CalibrationPhase.Verify:
+                    _builder.AppendLine("<color=#88ff88>검증</color>");
+                    break;
+            }
+
+            if (!string.IsNullOrEmpty(_calibrationMessage)) _builder.AppendLine(_calibrationMessage);
+
+            _builder.AppendLine($"<color=#888888>{resetMarkerKey} 보정값 지우기</color>");
+        }
+
+        // ── 입력 보조 ────────────────────────────────────────────────────────────
+
+        // 누르고 있으면 연속 조정되도록, 이번 프레임에 몇 번 눌린 것으로 칠지 계산한다.
+        float KeyStep(KeyCode key)
+        {
+            if (Input.GetKeyDown(key))
+            {
+                _holdTimes[key] = 0f;
+                return 1f;
+            }
+
+            if (!Input.GetKey(key))
+            {
+                _holdTimes.Remove(key);
+                return 0f;
+            }
+
+            float previous = _holdTimes.TryGetValue(key, out var value) ? value : 0f;
+            float current = previous + Time.unscaledDeltaTime;
+            _holdTimes[key] = current;
+
+            if (current < repeatDelay) return 0f;
+
+            float before = Mathf.Floor(Mathf.Max(0f, previous - repeatDelay) * repeatRate);
+            float after = Mathf.Floor((current - repeatDelay) * repeatRate);
+            return after - before;
+        }
+
+        static bool IsShiftHeld() => Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+
+        static int IndexOf(IReadOnlyList<int> list, int value)
+        {
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i] == value) return i;
+            }
+            return -1;
+        }
+    }
+}
