@@ -1,0 +1,16 @@
+{
+    "name": "com.polarized.arucopages",
+    "displayName": "ArUco Pages",
+    "version": "1.0.0",
+    "unity": "2022.3",
+    "description": "책 페이지에 붙인 ArUco 마커를 카메라로 읽어, 페이지 면 위에 이미지를 눕혀 띄우는 전시용 패키지. 마커 네 꼭짓점으로 호모그래피를 세우므로 카메라 캘리브레이션이 필요 없다. OpenCV for Unity(에셋스토어)가 별도로 필요하다.",
+    "keywords": [
+        "aruco",
+        "ar",
+        "opencv",
+        "exhibition"
+    ],
+    "author": {
+        "name": "MinJun"
+    }
+}
