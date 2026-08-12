@@ -161,9 +161,15 @@ namespace StoryRest.ArUco
     [Serializable]
     public class ArUcoConfig
     {
-        // OpenCV predefined dictionary 번호. 0 = DICT_4X4_50.
+        // OpenCV predefined dictionary 번호. 1 = DICT_4X4_100 (ID 0~99).
         // 인쇄한 마커와 반드시 같아야 한다.
-        public int dictionaryId = 0;
+        //
+        // 4X4 계열은 같은 바이트 표를 앞에서부터 잘라 쓴다 — DICT_4X4_100 의 0~49 번은
+        // DICT_4X4_50 의 것과 비트까지 동일하다. 그래서 50 → 100 으로 넓혀도 이미 인쇄한
+        // 마커를 다시 뽑을 필요가 없다(오류정정 비트도 1 로 같다).
+        // 다만 마커 간 최소 해밍거리가 4 → 3 으로 줄어 오검출 여유는 조금 좁아진다.
+        // 현장에서 엉뚱한 ID 가 튀면 DICT_5X5_100(=5)으로 올린다 — 이때는 전량 재인쇄해야 한다.
+        public int dictionaryId = 1;
 
         // 0 = 즉시 반응(떨림 많음), 1 에 가까울수록 부드럽지만 늦게 따라온다.
         public float smoothing = 0.4f;
@@ -186,10 +192,10 @@ namespace StoryRest.ArUco
         // 캘리브레이션 전용으로 예약한 마커 ID. 콘텐츠 마커와 겹치면 안 된다.
         // 프로젝터가 이 ID 들을 투사하고 카메라가 그것을 읽어 대응점을 얻는다.
         //
-        // 반드시 dictionaryId 가 가진 범위 안이어야 한다. 기본값 DICT_4X4_50 은 0~49 뿐이므로
-        // 콘텐츠가 0번부터 늘어난다고 보고 뒤쪽 네 개를 예약해 둔다.
+        // 반드시 dictionaryId 가 가진 범위 안이어야 한다. 기본값 DICT_4X4_100 은 0~99 이므로
+        // 콘텐츠가 0번부터 늘어난다고 보고 뒤쪽 네 개를 예약해 둔다(콘텐츠에 0~95 가 남는다).
         // 딕셔너리를 더 큰 것으로 바꾸면 이 값도 함께 옮기는 편이 안전하다.
-        public int[] calibrationMarkerIds = { 46, 47, 48, 49 };
+        public int[] calibrationMarkerIds = { 96, 97, 98, 99 };
 
         // 켜면 에디터에서만 세트들을 한 화면에 좌우로 나눠 그린다. 빌드에서는 무시된다.
         //

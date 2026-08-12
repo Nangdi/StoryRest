@@ -20,6 +20,13 @@ namespace StoryRest.ArUco
 
         /// <param name="sizePx">여백을 뺀 마커 자체의 한 변 픽셀 수</param>
         /// <returns>만들지 못하면 null. 딕셔너리에 없는 ID 가 대표적인 원인이다.</returns>
+        ///
+        /// <remarks>
+        /// 마커는 흑백 그대로 둔다. 프로젝터는 빛을 더하기만 하므로, 어두운 칸에 아무것도 쏘지 않는
+        /// 검은색이 가장 어둡다. 다른 색을 쓰면 그만큼 밝아져 오히려 대비가 줄어든다.
+        /// (흰 종이 기준 — 검정 칸 대비 55, 파란 칸 대비 31)
+        /// 밝은 투사면에서 인식이 안 되는 것은 색이 아니라 투사면 밝기 탓이다. → docs/ARCHITECTURE.md §1
+        /// </remarks>
         public static Texture2D Get(int dictionaryId, int markerId, int sizePx = 256)
         {
             long key = ((long)dictionaryId << 40) ^ ((long)markerId << 16) ^ sizePx;
@@ -35,7 +42,7 @@ namespace StoryRest.ArUco
 
         /// <summary>
         /// 그 딕셔너리가 가진 마커 개수(= 쓸 수 있는 ID 는 0 ~ 개수-1).
-        /// 예: DICT_4X4_50 은 50개뿐이라 240 번 같은 ID 는 존재하지 않는다.
+        /// 예: DICT_4X4_100 은 100개뿐이라 240 번 같은 ID 는 존재하지 않는다.
         /// </summary>
         public static int GetDictionarySize(int dictionaryId)
         {

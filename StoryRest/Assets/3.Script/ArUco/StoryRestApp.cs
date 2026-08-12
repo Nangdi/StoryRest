@@ -49,6 +49,7 @@ namespace StoryRest.ArUco
 
             Content = new ArUcoContentIndex();
             Content.Rescan(Settings.ContentRoot);
+            ValidateContentMarkers();
 
             KeywordConfig = KeywordWallConfig.Load();
             ValidateDisplayAssignment();
@@ -152,7 +153,7 @@ namespace StoryRest.ArUco
 
         /// <summary>
         /// 캘리브레이션용 마커가 실제로 만들 수 있는 ID 인지 확인한다.
-        /// 딕셔너리마다 가진 개수가 다르다 — DICT_4X4_50 은 0~49 뿐이다.
+        /// 딕셔너리마다 가진 개수가 다르다 — DICT_4X4_100 은 0~99 뿐이다.
         /// 여기서 걸러내지 않으면 설치 현장에서 보정을 시도할 때에야 알게 된다.
         /// </summary>
         void ValidateCalibrationMarkers()
@@ -177,6 +178,42 @@ namespace StoryRest.ArUco
 
                 _problems.Add($"캘리브레이션 마커 {ids[i]}번은 딕셔너리 {Config.dictionaryId} " +
                               $"(쓸 수 있는 ID: 0~{size - 1}) 에 없습니다. 자동 보정이 동작하지 않습니다.");
+            }
+        }
+
+        /// <summary>
+        /// 콘텐츠 폴더 이름(= 마커 ID)이 실제로 인식될 수 있는 번호인지 확인한다.
+        ///
+        /// 폴더를 만드는 것만으로 마커가 늘어나는 구조라(→ ArUcoContentIndex), 딕셔너리 범위를
+        /// 넘는 번호나 캘리브레이션용으로 예약한 번호로 폴더를 만들어도 아무 말 없이 무시된다.
+        /// 그 폴더의 영상은 전시 내내 한 번도 뜨지 않으므로, 시작할 때 짚어 준다.
+        /// </summary>
+        void ValidateContentMarkers()
+        {
+            int size = ArUcoMarkerTexture.GetDictionarySize(Config.dictionaryId);
+            if (size <= 0) return; // 딕셔너리 자체의 문제는 ValidateCalibrationMarkers 가 이미 보고했다.
+
+            var outOfRange = new List<int>();
+            var reserved = new List<int>();
+
+            foreach (int id in Content.MarkerIds)
+            {
+                if (id < 0 || id >= size) outOfRange.Add(id);
+                else if (Config.IsCalibrationMarker(id)) reserved.Add(id);
+            }
+
+            if (outOfRange.Count > 0)
+            {
+                _problems.Add($"콘텐츠 폴더 [{string.Join(", ", outOfRange)}] 는 딕셔너리 {Config.dictionaryId} " +
+                              $"(쓸 수 있는 ID: 0~{size - 1}) 밖이라 인식되지 않습니다. " +
+                              $"더 큰 딕셔너리로 바꾸거나 폴더 번호를 옮기세요.");
+            }
+
+            if (reserved.Count > 0)
+            {
+                _problems.Add($"콘텐츠 폴더 [{string.Join(", ", reserved)}] 가 캘리브레이션 예약 ID 와 겹칩니다. " +
+                              $"이 마커는 콘텐츠를 띄우지 않습니다. " +
+                              $"aruco.json 의 calibrationMarkerIds 나 폴더 번호를 옮기세요.");
             }
         }
 
