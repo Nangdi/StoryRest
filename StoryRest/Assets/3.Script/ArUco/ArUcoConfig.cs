@@ -238,6 +238,17 @@ namespace StoryRest.ArUco
         // 딕셔너리를 더 큰 것으로 바꾸면 이 값도 함께 옮기는 편이 안전하다.
         public int[] calibrationMarkerIds = { 96, 97, 98, 99 };
 
+        // 수동 보정에서 "마커를 여기에 놓으세요" 자리를 표시할 사각형의 크기.
+        // 화면 짧은 변을 1 로 보는 비율이다.
+        //
+        // 실물 마커가 몇 cm 인지, 프로젝터가 얼마나 떨어져 있는지에 따라 화면상 크기가 달라지므로
+        // 현장에서 + / - 로 맞춘다. 사각형과 마커가 같은 크기여야 마커 중심이 조준점에 오고,
+        // 그래야 대응점이 정확해진다.
+        public float manualTargetSize = 0.12f;
+
+        public const float MinManualTargetSize = 0.02f;
+        public const float MaxManualTargetSize = 0.5f;
+
         // 켜면 에디터에서만 세트들을 한 화면에 좌우로 나눠 그린다. 빌드에서는 무시된다.
         //
         // 기본은 꺼 둔다. 나눠 그리면 세트 하나의 화면 비율이 실제 프로젝터와 달라져
@@ -316,6 +327,7 @@ namespace StoryRest.ArUco
             warpSubdivisions = Mathf.Clamp(warpSubdivisions, 1, 32);
             maxSimultaneous = Mathf.Max(0, maxSimultaneous);
             maxConcurrentVideos = Mathf.Max(1, maxConcurrentVideos);
+            manualTargetSize = Mathf.Clamp(manualTargetSize, MinManualTargetSize, MaxManualTargetSize);
 
             for (int i = 0; i < sets.Count; i++)
             {

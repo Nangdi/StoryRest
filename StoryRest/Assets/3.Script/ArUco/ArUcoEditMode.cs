@@ -91,6 +91,11 @@ namespace StoryRest.ArUco
 
         Texture2D _crosshair;
 
+        // 마커 놓을 자리 표시용 사각형. 화면상 선 두께를 일정하게 유지하려고
+        // 크기가 바뀌면 다시 만든다(→ TargetFrame).
+        Texture2D _frame;
+        int _frameThickness = -1;
+
         public bool IsActive => _active;
 
         void Awake()
@@ -101,6 +106,7 @@ namespace StoryRest.ArUco
         void OnDestroy()
         {
             if (_crosshair != null) Destroy(_crosshair);
+            if (_frame != null) Destroy(_frame);
         }
 
         ArUcoSet CurrentSet
@@ -394,7 +400,7 @@ namespace StoryRest.ArUco
             switch (_phase)
             {
                 case CalibrationPhase.Auto: CollectAuto(set, projectorPoints); break;
-                case CalibrationPhase.Manual: CollectManual(set); break;
+                case CalibrationPhase.Manual: CollectManual(set); AdjustTargetSize(); break;
             }
 
             DrawCalibrationOverlay(set, projectorPoints);
@@ -446,7 +452,27 @@ namespace StoryRest.ArUco
 
             for (int i = 0; i < 4; i++) _collectedOk[i] = false;
 
-            _calibrationMessage = "조준점 자리에 마커를 놓고 Space 를 누르세요.";
+            _calibrationMessage = "사각형 안에 마커를 맞춰 놓고 Space 를 누르세요.";
+        }
+
+        /// <summary>
+        /// 마커 놓을 자리 사각형의 크기를 맞춘다.
+        /// 실물 마커 크기와 프로젝터 거리에 따라 화면상 크기가 달라지므로 현장에서 정한다.
+        /// 값은 세트가 아니라 전체 공통이다 — 같은 마커를 들고 세트를 옮겨 다니며 보정하기 때문이다.
+        /// </summary>
+        void AdjustTargetSize()
+        {
+            float grow = KeyStep(KeyCode.Equals) + KeyStep(KeyCode.Plus) + KeyStep(KeyCode.KeypadPlus);
+            float shrink = KeyStep(KeyCode.Minus) + KeyStep(KeyCode.KeypadMinus);
+
+            float delta = (grow - shrink) * _app.Config.adjustScaleStep * (IsShiftHeld() ? fineMultiplier : 1f);
+            if (delta == 0f) return;
+
+            _app.Config.manualTargetSize = Mathf.Clamp(
+                _app.Config.manualTargetSize + delta,
+                ArUcoConfig.MinManualTargetSize, ArUcoConfig.MaxManualTargetSize);
+
+            MarkDirty();
         }
 
         /// <summary>
@@ -508,12 +534,12 @@ namespace StoryRest.ArUco
             var markers = set.Tracker.Markers;
             if (markers.Count == 0)
             {
-                _calibrationMessage = $"{_manualIndex + 1}/4 — 조준점 자리에 마커를 놓으세요. (마커가 보이지 않습니다)";
+                _calibrationMessage = $"{_manualIndex + 1}/4 — 사각형 안에 마커를 놓으세요. (마커가 보이지 않습니다)";
                 return;
             }
 
             // 화면상 가장 크게 잡힌 것을 쓴다(Tracker 가 크기 내림차순으로 정렬해 둔다).
-            _calibrationMessage = $"{_manualIndex + 1}/4 — 마커가 보입니다. 자리가 맞으면 Space 를 누르세요.";
+            _calibrationMessage = $"{_manualIndex + 1}/4 — 마커가 보입니다. 사각형에 맞았으면 Space 를 누르세요.";
         }
 
         void ConfirmManualPoint(ArUcoSet set)
@@ -577,11 +603,14 @@ namespace StoryRest.ArUco
 
                     case CalibrationPhase.Manual:
                         // 지금 짚어야 할 점만 밝게, 나머지는 흐리게.
+                        // 네 자리 모두 같은 크기로 그린다 — 실물 마커를 맞춰 놓을 자리이기 때문이다.
                         bool current = i == _manualIndex;
                         Color tint = _collectedOk[i]
                             ? new Color(0.3f, 1f, 0.4f, 0.9f)
                             : (current ? Color.white : new Color(1f, 1f, 1f, 0.25f));
-                        view.DrawOverlay(projectorPoints[i], current ? 0.05f : 0.03f, Crosshair(), tint);
+
+                        float size = _app.Config.manualTargetSize;
+                        view.DrawOverlay(projectorPoints[i], size, TargetFrame(size, view.CanvasSize), tint);
                         break;
 
                     default:
@@ -624,6 +653,61 @@ namespace StoryRest.ArUco
             _crosshair.SetPixels32(pixels);
             _crosshair.Apply();
             return _crosshair;
+        }
+
+        /// <summary>
+        /// 마커를 놓을 자리를 표시하는 사각형. 네 모서리만 그려 마커 면 위에 빛이 겹치지 않게 한다
+        /// (마커 위로 투사광이 떨어지면 흑백 대비가 무너져 인식률이 떨어진다).
+        ///
+        /// 사각형을 키우면 텍스처가 함께 늘어나 선까지 굵어지므로, 화면에 그려질 두께가
+        /// 일정해지도록 텍스처 안에서의 두께를 역으로 구한다. 그 값이 달라질 때만 다시 만든다.
+        /// </summary>
+        /// <param name="sizeNormalized">화면 짧은 변을 1 로 보는 사각형 크기</param>
+        Texture2D TargetFrame(float sizeNormalized, Vector2 canvasSize)
+        {
+            const int size = 128;
+            const float linePixels = 3f;    // 화면에 그려질 선 두께
+            const float armRatio = 0.28f;   // 모서리에서 뻗어 나가는 길이(한 변 대비)
+
+            float sidePixels = Mathf.Max(1f, sizeNormalized * Mathf.Min(canvasSize.x, canvasSize.y));
+            int thickness = Mathf.Clamp(Mathf.RoundToInt(linePixels / sidePixels * size), 1, size / 6);
+
+            if (_frame != null && thickness == _frameThickness) return _frame;
+
+            if (_frame == null)
+            {
+                _frame = new Texture2D(size, size, TextureFormat.RGBA32, false);
+                _frame.filterMode = FilterMode.Bilinear;
+                _frame.wrapMode = TextureWrapMode.Clamp;
+            }
+
+            int arm = Mathf.RoundToInt(size * armRatio);
+            var pixels = new Color32[size * size];
+
+            for (int y = 0; y < size; y++)
+            {
+                bool onHorizontalEdge = y < thickness || y >= size - thickness;
+                bool withinVerticalArm = y < arm || y >= size - arm;
+
+                for (int x = 0; x < size; x++)
+                {
+                    bool onVerticalEdge = x < thickness || x >= size - thickness;
+                    bool withinHorizontalArm = x < arm || x >= size - arm;
+
+                    bool visible = (onHorizontalEdge && withinHorizontalArm)
+                                || (onVerticalEdge && withinVerticalArm);
+
+                    pixels[y * size + x] = visible
+                        ? new Color32(255, 255, 255, 255)
+                        : new Color32(255, 255, 255, 0);
+                }
+            }
+
+            _frame.SetPixels32(pixels);
+            _frame.Apply();
+            _frameThickness = thickness;
+
+            return _frame;
         }
 
         // ── 저장 ─────────────────────────────────────────────────────────────────
@@ -756,6 +840,8 @@ namespace StoryRest.ArUco
 
                 case CalibrationPhase.Manual:
                     _builder.AppendLine($"수동 보정  <b>{Mathf.Min(_manualIndex + 1, 4)}/4</b>");
+                    _builder.AppendLine($"자리 크기  <b>{_app.Config.manualTargetSize:0.00}</b>" +
+                                        $"   <color=#888888>+ / - 로 실물 마커에 맞춤 (Shift 미세)</color>");
                     break;
 
                 case CalibrationPhase.Verify:
