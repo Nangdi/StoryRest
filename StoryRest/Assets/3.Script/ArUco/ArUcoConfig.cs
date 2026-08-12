@@ -124,7 +124,32 @@ namespace StoryRest.ArUco
         // 이 세트의 모든 콘텐츠에 공통으로 곱해지는 배율. 현장에서 전체 크기를 한 번에 맞출 때 쓴다.
         public float globalScale = 1f;
 
+        // 이 세트의 모든 콘텐츠에 공통으로 더해지는 위치. 마커별 offset 은 이 값 위에 얹힌다
+        // (최종 위치 = globalOffset + markers[].offset).
+        //
+        // "콘텐츠는 늘 마커 위쪽" 같은 공통 배치를 한 번에 잡고 예외만 개별로 손보라는 값이다.
+        // 마커별 값을 일일이 고치지 않으므로 나중에 전체를 다시 밀 수 있다.
+        //
+        // 단위는 마커 한 변을 1 로 보는 상대값이고, 마커 평면 기준이라 책자를 돌리면 함께 돈다.
+        public float globalOffsetX = 0f;
+        public float globalOffsetY = 0f;
+
         public List<MarkerConfig> markers = new List<MarkerConfig>();
+
+        /// <summary>세트 공통 배치를 기본값으로 되돌린다. 마커별 값은 건드리지 않는다.</summary>
+        public void ResetGlobalPlacement()
+        {
+            globalScale = 1f;
+            globalOffsetX = 0f;
+            globalOffsetY = 0f;
+        }
+
+        /// <summary>이 층에서 쓰는 세트인지. floors 가 비어 있으면 모든 층에서 쓴다.</summary>
+        public bool IsUsedOnFloor(int floor)
+        {
+            if (floors == null || floors.Length == 0) return true;
+            return Array.IndexOf(floors, floor) >= 0;
+        }
 
         public MarkerConfig Find(int id)
         {

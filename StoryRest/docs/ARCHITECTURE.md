@@ -269,6 +269,8 @@ canvas.planeDistance = 1f;
       },
 
       "globalScale": 1.0,
+      "globalOffsetX": 0.0,
+      "globalOffsetY": 1.2,
       "markers": [
         { "id": 3, "scale": 1.2, "offsetX": 0.10, "offsetY": -0.40, "rotationOffset": 0, "enabled": true }
       ]
@@ -280,6 +282,11 @@ canvas.planeDistance = 1f;
 - `projectorPoints`는 **출력 해상도에 대한 0~1 정규화 좌표**다. 프로젝터 해상도가 바뀌어도 유지된다.
 - `cameraPoints`는 카메라 픽셀 좌표. 캘리브레이션으로 채워진다.
 - `globalScale`과 `markers`가 **세트 안으로 들어간 것**이 기존 구조와의 핵심 차이다.
+- **최종 배치 = 세트 공통값 + 마커별 값**이다.
+  `globalOffsetX/Y`는 모든 마커에 더해지고 `globalScale`은 곱해진다.
+  위 예에서 3번 마커는 `(0.10, -0.40 + 1.2)` = `(0.10, 0.80)` 자리에 뜬다.
+  "콘텐츠는 늘 마커 위쪽" 같은 공통 배치를 한 번에 잡고 예외만 개별로 손보라는 값이다.
+  마커별 값을 일일이 고치지 않으므로 나중에 전체를 다시 밀 수 있다.
 - 층이 다르면 콘텐츠 폴더가 다르므로, 층마다 별도의 `aruco.json`을 갖는 셈이 된다.
 
 `JsonUtility`는 중첩 리스트와 `Vector2[]`를 다루므로 좌표는 `[{x,y}]` 형태의
@@ -377,7 +384,8 @@ ArUcoContentLibrary
 | `F2` | 단계 전환 (마커 배치 ↔ 코너 보정) |
 | `1`~`9` | 조정할 세트 선택 (세트가 여럿일 때) |
 | `Tab` / `Shift+Tab` | 마커 선택 |
-| `← → ↑ ↓` `+` `-` `[` `]` | 위치 · 크기 · 회전 |
+| `← → ↑ ↓` `+` `-` `[` `]` | 선택한 마커의 위치 · 크기 · 회전 |
+| `Ctrl` 병행 | 세트 전체 위치 · 크기 (`globalOffsetX/Y`, `globalScale`) |
 | `PageUp` / `PageDown` | 세트 전체 배율 |
 | `Space` | 코너 보정 진행 (자동 시작 → 수동 전환 → 점 확정 → 완료) |
 | `Backspace` | 마커 초기화 / 보정값 지우기 |

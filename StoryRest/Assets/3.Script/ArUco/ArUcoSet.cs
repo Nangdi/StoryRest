@@ -187,7 +187,8 @@ namespace StoryRest.ArUco
                 if (!plane.IsValid) continue;
 
                 var style = ArUcoDrawStyle.Default(
-                    _set.globalScale, _config.warpSubdivisions, _config.perspectiveMapping);
+                    _set.globalScale, new Vector2(_set.globalOffsetX, _set.globalOffsetY),
+                    _config.warpSubdivisions, _config.perspectiveMapping);
 
                 if (_library.TryGetFrame(marker.id, out Texture texture, out bool flipV, out float aspect))
                 {
@@ -250,8 +251,10 @@ namespace StoryRest.ArUco
             int columns = Mathf.CeilToInt(Mathf.Sqrt(ids.Count));
             int rows = Mathf.CeilToInt(ids.Count / (float)columns);
 
+            // 격자는 화면 좌표를 직접 쓰므로 세트 공통 배치를 적용하지 않는다.
+            // 여기서 확인하려는 것은 배치가 아니라 "영상 파일이 제대로 들어갔는지" 다.
             var placement = new MarkerConfig { id = -1 };
-            var style = ArUcoDrawStyle.Default(1f, _config.warpSubdivisions, false);
+            var style = ArUcoDrawStyle.Default(1f, Vector2.zero, _config.warpSubdivisions, false);
 
             for (int i = 0; i < ids.Count; i++)
             {

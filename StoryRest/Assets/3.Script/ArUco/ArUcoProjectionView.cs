@@ -326,8 +326,11 @@ namespace StoryRest.ArUco
 
                     // 마커 평면 안에서 회전·이동시킨다. 평면 위에서 처리하므로
                     // 책자를 어떻게 돌리고 눕혀도 콘텐츠는 페이지의 같은 자리에 머문다.
-                    float rx = px * cos - py * sin + marker.offsetX;
-                    float ry = px * sin + py * cos + marker.offsetY;
+                    //
+                    // 세트 공통 위치는 개별 회전 뒤에 더한다. 마커별 offset 과 같은 좌표계에 있어야
+                    // "전체를 밀어 둔 자리에서 이 마커만 조금 더" 가 예상대로 동작한다.
+                    float rx = px * cos - py * sin + marker.offsetX + style.globalOffset.x;
+                    float ry = px * sin + py * cos + marker.offsetY + style.globalOffset.y;
 
                     // 마커 중심이 (0.5, 0.5), 한 변이 1. v 는 아래로 증가하므로 y 부호를 뒤집는다.
                     if (!plane.TryMap(new Vector2(0.5f + rx, 0.5f - ry), out Vector2 cameraPixel))
@@ -408,10 +411,15 @@ namespace StoryRest.ArUco
         public float aspect;
 
         public float globalScale;
+
+        // 세트 공통 위치. 마커별 offset 위에 더해진다(→ SetConfig.globalOffsetX/Y).
+        public Vector2 globalOffset;
+
         public int subdivisions;
         public bool perspective;
 
-        public static ArUcoDrawStyle Default(float globalScale, int subdivisions, bool perspective)
+        public static ArUcoDrawStyle Default(float globalScale, Vector2 globalOffset,
+                                             int subdivisions, bool perspective)
         {
             return new ArUcoDrawStyle
             {
@@ -420,6 +428,7 @@ namespace StoryRest.ArUco
                 flipV = false,
                 aspect = 1f,
                 globalScale = globalScale,
+                globalOffset = globalOffset,
                 subdivisions = subdivisions,
                 perspective = perspective,
             };

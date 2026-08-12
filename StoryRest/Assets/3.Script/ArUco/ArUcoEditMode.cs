@@ -233,18 +233,12 @@ namespace StoryRest.ArUco
                 MarkDirty();
             }
 
-            if (Input.GetKeyDown(resetMarkerKey) && _selectedMarkerId >= 0)
-            {
-                set.Config.GetOrCreate(_selectedMarkerId).ResetPlacement();
-                MarkDirty();
-            }
+            if (Input.GetKeyDown(resetMarkerKey)) ResetPlacement(set);
 
-            if (_selectedMarkerId < 0) return;
-
-            var marker = set.Config.GetOrCreate(_selectedMarkerId);
             var config = _app.Config;
             float fine = IsShiftHeld() ? fineMultiplier : 1f;
 
+            // 키는 프레임당 한 번만 읽는다. KeyStep 이 홀드 상태를 갱신하므로 두 번 부르면 어긋난다.
             float dx = (KeyStep(KeyCode.RightArrow) - KeyStep(KeyCode.LeftArrow)) * config.adjustPositionStep * fine;
             float dy = (KeyStep(KeyCode.UpArrow) - KeyStep(KeyCode.DownArrow)) * config.adjustPositionStep * fine;
 
@@ -253,16 +247,55 @@ namespace StoryRest.ArUco
             float ds = (grow - shrink) * config.adjustScaleStep * fine;
 
             float dr = (KeyStep(KeyCode.RightBracket) - KeyStep(KeyCode.LeftBracket)) * config.adjustRotationStep * fine;
-            float dGlobal = (KeyStep(KeyCode.PageUp) - KeyStep(KeyCode.PageDown)) * config.adjustScaleStep * fine;
+            float dPage = (KeyStep(KeyCode.PageUp) - KeyStep(KeyCode.PageDown)) * config.adjustScaleStep * fine;
 
-            if (dx == 0f && dy == 0f && ds == 0f && dr == 0f && dGlobal == 0f) return;
+            // Ctrl 을 누르면 같은 키가 세트 전체에 걸린다.
+            // 마커를 고르지 않아도 되므로, 콘텐츠를 채우기 전에 공통 배치부터 잡을 수 있다.
+            if (IsCtrlHeld())
+            {
+                if (dx == 0f && dy == 0f && ds == 0f && dPage == 0f) return;
+
+                set.Config.globalOffsetX += dx;
+                set.Config.globalOffsetY += dy;
+                set.Config.globalScale = Mathf.Max(0.05f, set.Config.globalScale + ds + dPage);
+
+                MarkDirty();
+                return;
+            }
+
+            // PageUp/PageDown 은 Ctrl 없이도 세트 배율을 바꾼다(기존 조작).
+            if (dPage != 0f)
+            {
+                set.Config.globalScale = Mathf.Max(0.05f, set.Config.globalScale + dPage);
+                MarkDirty();
+            }
+
+            if (_selectedMarkerId < 0) return;
+            if (dx == 0f && dy == 0f && ds == 0f && dr == 0f) return;
+
+            var marker = set.Config.GetOrCreate(_selectedMarkerId);
 
             marker.offsetX += dx;
             marker.offsetY += dy;
             marker.scale = Mathf.Max(0.05f, marker.scale + ds);
             marker.rotationOffset = Mathf.Repeat(marker.rotationOffset + dr + 180f, 360f) - 180f;
-            set.Config.globalScale = Mathf.Max(0.05f, set.Config.globalScale + dGlobal);
 
+            MarkDirty();
+        }
+
+        /// <summary>Backspace 는 선택한 마커를, Ctrl+Backspace 는 세트 공통 배치를 되돌린다.</summary>
+        void ResetPlacement(ArUcoSet set)
+        {
+            if (IsCtrlHeld())
+            {
+                set.Config.ResetGlobalPlacement();
+                MarkDirty();
+                return;
+            }
+
+            if (_selectedMarkerId < 0) return;
+
+            set.Config.GetOrCreate(_selectedMarkerId).ResetPlacement();
             MarkDirty();
         }
 
@@ -631,7 +664,15 @@ namespace StoryRest.ArUco
                 _builder.AppendLine($"회전  <b>{marker.rotationOffset:+0.0;-0.0; 0.0}°</b>   <color=#888888>[ / ]</color>");
             }
 
-            _builder.AppendLine($"전체배율  <b>{set.Config.globalScale:0.00}</b>   <color=#888888>PageUp / PageDown</color>");
+            _builder.AppendLine();
+            _builder.AppendLine($"<color=#ffd633>세트 공통</color>  " +
+                                $"크기 <b>{set.Config.globalScale:0.00}</b>  " +
+                                $"좌우 <b>{set.Config.globalOffsetX:+0.00;-0.00; 0.00}</b>  " +
+                                $"상하 <b>{set.Config.globalOffsetY:+0.00;-0.00; 0.00}</b>");
+            _builder.AppendLine($"<color=#888888>Ctrl 병행 — 모든 마커가 함께 움직입니다 " +
+                                $"(Ctrl+{resetMarkerKey} 초기화 · PageUp/PageDown 도 크기)</color>");
+
+            _builder.AppendLine();
             _builder.AppendLine($"원근  <b>{(_app.Config.perspectiveMapping ? "켜짐" : "꺼짐")}</b>   <color=#888888>{perspectiveKey}</color>");
             _builder.AppendLine($"<color=#888888>Shift 병행 미세조정 · {resetMarkerKey} 이 마커 초기화 · {saveKey} 즉시저장</color>");
         }
@@ -698,6 +739,8 @@ namespace StoryRest.ArUco
         }
 
         static bool IsShiftHeld() => Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+
+        static bool IsCtrlHeld() => Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
 
         static int IndexOf(IReadOnlyList<int> list, int value)
         {
