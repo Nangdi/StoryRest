@@ -1,0 +1,60 @@
+{
+    "enabled": true,
+    "walls": [
+        {
+            "displayIndex": 1,
+            "floors": [
+                1
+            ]
+        },
+        {
+            "displayIndex": 2,
+            "floors": [
+                1,
+                2,
+                3
+            ]
+        },
+        {
+            "displayIndex": 3,
+            "floors": [
+                2,
+                3
+            ]
+        }
+    ],
+    "maxOnScreen": 16,
+    "minFontSize": 44.0,
+    "maxFontSize": 132.0,
+    "minSpeed": 0.012000000104308129,
+    "maxSpeed": 0.054999999701976779,
+    "minAlpha": 0.30000001192092898,
+    "maxAlpha": 0.949999988079071,
+    "minLifetime": 14.0,
+    "maxLifetime": 30.0,
+    "fadeSeconds": 1.7999999523162842,
+    "motions": [
+        "Drift",
+        "Wave",
+        "Orbit",
+        "Bob",
+        "Zigzag"
+    ],
+    "colors": [
+        "#FFFFFF",
+        "#8FE3FF",
+        "#B9C7FF",
+        "#9FFFE0",
+        "#FFE9A8"
+    ],
+    "backgroundColor": {
+        "r": 0.0,
+        "g": 0.0,
+        "b": 0.0,
+        "a": 1.0
+    },
+    "avoidDuplicates": true,
+    "separation": 0.5,
+    "separationPadding": 1.149999976158142,
+    "edgeMargin": 0.029999999329447748
+}

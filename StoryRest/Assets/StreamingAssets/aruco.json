@@ -1,17 +1,18 @@
 {
-    "dictionaryId": 0,
+    "dictionaryId": 1,
     "smoothing": 0.4000000059604645,
     "holdSeconds": 0.30000001192092898,
     "warpSubdivisions": 10,
-    "perspectiveMapping": true,
+    "perspectiveMapping": false,
     "maxSimultaneous": 0,
     "maxConcurrentVideos": 4,
     "calibrationMarkerIds": [
-        46,
-        47,
-        48,
-        49
+        96,
+        97,
+        98,
+        99
     ],
+    "manualTargetSize": 0.10800004750490189,
     "editorPreview": false,
     "debugPreviewContent": false,
     "adjustPositionStep": 0.019999999552965165,
@@ -20,6 +21,11 @@
     "sets": [
         {
             "name": "A",
+            "floors": [
+                1,
+                2,
+                3
+            ],
             "displayIndex": 0,
             "camera": {
                 "deviceId": 0,
@@ -52,7 +58,54 @@
                 "cameraPoints": [],
                 "valid": false
             },
+            "showCameraPreview": false,
+            "globalScale": 1.0199999809265137,
+            "globalOffsetX": 0.0,
+            "globalOffsetY": 0.0,
+            "markers": []
+        },
+        {
+            "name": "B",
+            "floors": [
+                2,
+                3
+            ],
+            "displayIndex": 1,
+            "camera": {
+                "deviceId": 1,
+                "backend": 0,
+                "width": 1280,
+                "height": 720,
+                "fps": 30,
+                "flipHorizontal": false,
+                "flipVertical": false
+            },
+            "calibration": {
+                "projectorPoints": [
+                    {
+                        "x": 0.15000000596046449,
+                        "y": 0.15000000596046449
+                    },
+                    {
+                        "x": 0.8500000238418579,
+                        "y": 0.15000000596046449
+                    },
+                    {
+                        "x": 0.8500000238418579,
+                        "y": 0.8500000238418579
+                    },
+                    {
+                        "x": 0.15000000596046449,
+                        "y": 0.8500000238418579
+                    }
+                ],
+                "cameraPoints": [],
+                "valid": false
+            },
+            "showCameraPreview": false,
             "globalScale": 1.0,
+            "globalOffsetX": 0.0,
+            "globalOffsetY": 0.0,
             "markers": []
         }
     ]
