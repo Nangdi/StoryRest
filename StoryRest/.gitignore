@@ -92,4 +92,7 @@ crashlytics-build.properties
 /[Aa]ssets/[Ss]creenshots.meta
 
 # 현장에서 넣는 콘텐츠 영상. 설정 파일과 안내문만 버전 관리한다.
-/[Aa]ssets/[Ss]treamingAssets/floor_*/*/
+# 다만 .gitkeep 은 남긴다 — 마커 ID 폴더가 없으면 옆의 .meta 가 고아가 되어
+# Unity 가 그것을 지우고, 클론할 때마다 폴더 GUID 가 새로 바뀐다.
+/[Aa]ssets/[Ss]treamingAssets/floor_*/*/*
+!/[Aa]ssets/[Ss]treamingAssets/floor_*/*/.gitkeep
