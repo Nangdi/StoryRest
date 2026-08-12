@@ -36,9 +36,15 @@ namespace StoryRest.ArUco
 
         readonly List<ArUcoWarpedImage> _pool = new List<ArUcoWarpedImage>();
         readonly List<RawImage> _overlayPool = new List<RawImage>();
+        readonly List<TMP_Text> _labelPool = new List<TMP_Text>();
         readonly List<Vector2> _nodes = new List<Vector2>();
 
+        // 라벨은 항상 콘텐츠 판 위에 와야 한다. 판이 늘어날 때마다 이 레이어를 맨 뒤로 옮겨
+        // (= 가장 나중에 그려지게) 순서를 유지한다. → NewWarpedImage
+        RectTransform _labelLayer;
+
         int _overlayUsed;
+        int _labelUsed;
 
         ArUcoProjection _projection;
         int _used;
@@ -142,6 +148,7 @@ namespace StoryRest.ArUco
         public void BeginFrame()
         {
             _used = 0;
+            _labelUsed = 0;
             _highlight.enabled = false;
         }
 
@@ -176,6 +183,72 @@ namespace StoryRest.ArUco
         public void EndFrame()
         {
             for (int i = _used; i < _pool.Count; i++) _pool[i].enabled = false;
+            for (int i = _labelUsed; i < _labelPool.Count; i++) _labelPool[i].enabled = false;
+        }
+
+        /// <summary>
+        /// 마커 자리에 안내 문구를 띄운다. 콘텐츠가 뜰 자리를 그대로 덮되 워프하지 않는다 —
+        /// 글자는 읽히는 것이 목적이라 원근을 주면 오히려 알아보기 어렵다.
+        /// </summary>
+        public bool DrawLabel(ArUcoHomography markerPlane, MarkerConfig marker, ArUcoDrawStyle style, string text)
+        {
+            if (!BuildGrid(markerPlane, marker, style, 0f)) return false;
+
+            // 워프된 사각형을 감싸는 박스를 잡는다. 마커가 기울어도 글자는 화면과 나란히 남는다.
+            Vector2 min = _nodes[0];
+            Vector2 max = _nodes[0];
+
+            for (int i = 1; i < _nodes.Count; i++)
+            {
+                min = Vector2.Min(min, _nodes[i]);
+                max = Vector2.Max(max, _nodes[i]);
+            }
+
+            var label = GetLabel(_labelUsed);
+            label.rectTransform.anchoredPosition = (min + max) * 0.5f;
+            label.rectTransform.sizeDelta = max - min;
+            label.text = text;
+            label.enabled = true;
+
+            _labelUsed++;
+            return true;
+        }
+
+        TMP_Text GetLabel(int index)
+        {
+            while (_labelPool.Count <= index)
+            {
+                if (_labelLayer == null)
+                {
+                    var layerGo = new GameObject("Labels", typeof(RectTransform));
+                    layerGo.transform.SetParent(_canvasRect, false);
+
+                    _labelLayer = layerGo.GetComponent<RectTransform>();
+                    Stretch(_labelLayer);
+                    _labelLayer.SetAsLastSibling();
+                }
+
+                var go = new GameObject($"Label{_labelPool.Count}", typeof(RectTransform));
+                go.transform.SetParent(_labelLayer, false);
+
+                var text = go.AddComponent<TextMeshProUGUI>();
+                text.color = Color.white;
+                text.raycastTarget = false;
+                text.richText = true;
+                text.alignment = TextAlignmentOptions.Center;
+                text.enableWordWrapping = true;
+
+                // 카메라와의 거리에 따라 마커가 크게도 작게도 잡히므로 글자를 판 크기에 맞춘다.
+                text.enableAutoSizing = true;
+                text.fontSizeMin = 10f;
+                text.fontSizeMax = 64f;
+
+                var rect = text.rectTransform;
+                rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0.5f, 0.5f);
+
+                _labelPool.Add(text);
+            }
+            return _labelPool[index];
         }
 
         // ── 편집모드용 ───────────────────────────────────────────────────────────
@@ -365,6 +438,10 @@ namespace StoryRest.ArUco
 
             // 격자 꼭짓점을 캔버스 로컬 좌표로 직접 넣으므로 RectTransform 은 화면 전체를 덮게 둔다.
             Stretch(image.rectTransform);
+
+            // 새로 만든 판이 라벨을 덮지 않게 한다. 풀이 늘어날 때만 일어나므로 곧 멈춘다.
+            if (_labelLayer != null) _labelLayer.SetAsLastSibling();
+
             return image;
         }
 

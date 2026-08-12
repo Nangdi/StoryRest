@@ -72,6 +72,8 @@ namespace StoryRest.ArUco
 
             Array.Sort(directories, StringComparer.OrdinalIgnoreCase);
 
+            int empty = 0;
+
             foreach (string directory in directories)
             {
                 string folderName = new DirectoryInfo(directory).Name;
@@ -83,7 +85,9 @@ namespace StoryRest.ArUco
                 string video = FindVideo(directory);
                 if (video == null)
                 {
-                    Debug.LogWarning($"[ArUco] {markerId}번 마커 폴더에 영상이 없습니다: {directory}");
+                    // 마커 ID 폴더는 미리 만들어 두고 영상을 나중에 채운다. 아직 빈 것은 정상이므로
+                    // 폴더마다 경고하지 않는다. 대신 그 마커가 잡히면 화면에 안내를 띄운다(→ ArUcoSet).
+                    empty++;
                     continue;
                 }
 
@@ -91,7 +95,8 @@ namespace StoryRest.ArUco
             }
 
             Debug.Log($"[ArUco] 콘텐츠 {_paths.Count}개를 찾았습니다: {contentRoot}\n" +
-                      $"마커 ID: [{string.Join(", ", MarkerIds)}]");
+                      $"마커 ID: [{string.Join(", ", MarkerIds)}]" +
+                      (empty > 0 ? $"\n영상이 아직 없는 폴더: {empty}개" : ""));
         }
 
         // 폴더당 영상은 1개다. 여러 개면 이름순 첫 번째를 쓴다.

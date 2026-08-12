@@ -190,6 +190,9 @@ namespace StoryRest.ArUco
                     _set.globalScale, new Vector2(_set.globalOffsetX, _set.globalOffsetY),
                     _config.warpSubdivisions, _config.perspectiveMapping);
 
+                bool hasContent = _content != null && _content.Has(marker.id);
+                bool showMissing = false;
+
                 if (_library.TryGetFrame(marker.id, out Texture texture, out bool flipV, out float aspect))
                 {
                     style.texture = texture;
@@ -199,12 +202,18 @@ namespace StoryRest.ArUco
                 }
                 else
                 {
-                    // 콘텐츠 폴더가 없거나, 슬롯이 모자라거나, 아직 첫 프레임이 안 나온 상태다.
                     // 자리만 잡아 두면 현장에서 "인식은 되는데 영상이 없다"를 바로 구분할 수 있다.
-                    style.tint = PlaceholderColor(marker.id, _content != null && _content.Has(marker.id));
+                    style.tint = PlaceholderColor(marker.id, hasContent);
+
+                    // 등록된 영상이 아예 없는 경우에만 그 사실을 적는다.
+                    // 슬롯이 모자라거나 첫 프레임을 기다리는 중이면 곧 영상이 뜨므로 문구를 띄우지 않는다.
+                    showMissing = !hasContent;
                 }
 
                 if (_view.Draw(plane, markerConfig, style)) drawn++;
+
+                if (showMissing)
+                    _view.DrawLabel(plane, markerConfig, style, $"{marker.id}번 마커\n영상이 없습니다");
 
                 if (marker.id == HighlightMarkerId)
                     _view.DrawHighlight(plane, markerConfig, style);
