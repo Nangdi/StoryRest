@@ -294,7 +294,9 @@ namespace StoryRest.ArUco
                 text.AppendLine($"  세트 {set.name}  카메라 {set.camera.deviceId}  " +
                                 $"디스플레이 {set.displayIndex}  " +
                                 $"캘리브레이션 {(set.calibration.IsUsable ? "완료" : "미완료")}  " +
-                                $"저장된 마커 {set.markers.Count}개");
+                                $"저장된 마커 {set.markers.Count}개" +
+                                (set.showCameraPreview ? "  · 카메라영상 켜짐" : ""));
+            }
 
             // 이 층에서 안 쓰는 세트가 있으면 "왜 안 뜨지" 를 바로 알 수 있게 함께 남긴다.
             if (Config.sets != null && Config.sets.Count > active.Count)
@@ -311,6 +313,16 @@ namespace StoryRest.ArUco
             text.Append($"  설정 파일: {ArUcoConfigIO.Path}");
 
             Debug.Log(text.ToString());
+
+            // 점검용 값이라 켜 둔 채로 전시가 시작되기 쉽다. 설정 문제는 아니므로 problems 와 따로 남긴다.
+            foreach (var set in active)
+            {
+                if (!set.showCameraPreview) continue;
+
+                Debug.LogWarning($"[StoryRest] 세트 '{set.name}' 이 카메라 영상을 함께 투사합니다(점검용). " +
+                                 $"전시 전에 편집모드에서 C 로 끄거나 " +
+                                 $"aruco.json 의 sets[].showCameraPreview 를 false 로 되돌리세요.");
+            }
 
             if (_problems.Count == 0) return;
 

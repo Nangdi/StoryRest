@@ -41,6 +41,7 @@ namespace StoryRest.ArUco
         [SerializeField] KeyCode reloadContentKey = KeyCode.F5;
         [SerializeField] KeyCode outlineKey = KeyCode.D;
         [SerializeField] KeyCode cameraPreviewKey = KeyCode.C;
+        [SerializeField] KeyCode contentKey = KeyCode.V;
         [SerializeField] KeyCode perspectiveKey = KeyCode.P;
         [SerializeField] KeyCode actionKey = KeyCode.Space;
         // GameManager 가 S 를 쓰고 SettingsPanelUI 가 Esc 를 쓰므로 겹치지 않게 Enter 로 둔다.
@@ -64,6 +65,10 @@ namespace StoryRest.ArUco
 
         bool _active;
         bool _cursorWasVisible;
+
+        // 콘텐츠를 그릴지. 단계를 바꿀 때마다 그 단계의 기본값으로 돌아가고, 그 위에서 사람이 뒤집는다
+        // (배치는 보면서 맞추고, 보정은 조준점만 남기는 것이 기본).
+        bool _showContent = true;
 
         int _setIndex;
         Stage _stage = Stage.Placement;
@@ -115,14 +120,18 @@ namespace StoryRest.ArUco
 
             if (!_active)
             {
+                HandleGlobalKeys();
                 FlushIfDirty(false);
                 return;
             }
 
+            // 세트를 먼저 고른다. 바뀐 뒤에 집어야 이번 프레임의 키가 옮겨 간 세트에 걸린다
+            // (이전 세트에 걸리면 그 세트에 편집 상태가 남는다).
+            HandleSetSelection();
+
             var set = CurrentSet;
             if (set == null || set.View == null || _app.Config == null) return;
 
-            HandleSetSelection();
             HandleStageSwitch(set);
             HandleCommonKeys(set);
 
@@ -142,6 +151,8 @@ namespace StoryRest.ArUco
                 // 커서를 숨겨 둔 키오스크 상태라도 편집 중에는 창을 다룰 수 있어야 한다.
                 _cursorWasVisible = Cursor.visible;
                 Cursor.visible = true;
+
+                _showContent = _stage == Stage.Placement;
             }
             else
             {
@@ -151,16 +162,43 @@ namespace StoryRest.ArUco
             }
 
             // 편집을 벗어나면 전시 상태로 되돌린다. 어떤 편집 UI 도 남으면 안 된다.
+            // 카메라 영상은 예외다 — 설정에 남는 값이라 사람이 끄기 전까지 유지한다.
             foreach (var s in _app.Sets)
             {
                 s.SuppressContent = false;
-                s.CameraPreviewEnabled = false;
                 s.HighlightMarkerId = -1;
                 s.View.ShowHud(null);
                 s.View.BeginOverlay();
                 s.View.EndOverlay();
                 s.Tracker.DrawDetectedMarkers = false;
             }
+        }
+
+        /// <summary>
+        /// 편집모드 밖에서도 받는 키. 카메라 영상만 허용한다 —
+        /// 설정에 남는 스위치라 편집모드까지 들어가지 않고도 켜고 끌 수 있어야 한다.
+        ///
+        /// 배치나 보정처럼 값을 바꾸는 조작은 여기서 받지 않는다(→ SPEC §6, 관람객이 건드릴 수 없어야 한다).
+        /// </summary>
+        void HandleGlobalKeys()
+        {
+            if (!Input.GetKeyDown(cameraPreviewKey)) return;
+            if (_app == null || _app.Sets.Count == 0) return;
+
+            // 밖에서는 세트를 고르는 개념이 없다. 한 번에 전부 같은 상태로 맞춘다 —
+            // 하나라도 켜져 있으면 끄고, 전부 꺼져 있으면 켠다.
+            bool anyOn = false;
+            for (int i = 0; i < _app.Sets.Count; i++)
+            {
+                if (!_app.Sets[i].CameraPreviewEnabled) continue;
+
+                anyOn = true;
+                break;
+            }
+
+            for (int i = 0; i < _app.Sets.Count; i++) _app.Sets[i].CameraPreviewEnabled = !anyOn;
+
+            MarkDirty();
         }
 
         void HandleSetSelection()
@@ -175,7 +213,6 @@ namespace StoryRest.ArUco
                 if (previous != null)
                 {
                     previous.SuppressContent = false;
-                    previous.CameraPreviewEnabled = false;
                     previous.HighlightMarkerId = -1;
                     previous.View.ShowHud(null);
                     previous.View.BeginOverlay();
@@ -185,6 +222,7 @@ namespace StoryRest.ArUco
                 _setIndex = i;
                 _selectedMarkerId = -1;
                 _phase = CalibrationPhase.Idle;
+                _showContent = _stage == Stage.Placement;
             }
         }
 
@@ -195,7 +233,9 @@ namespace StoryRest.ArUco
             _stage = _stage == Stage.Placement ? Stage.Calibration : Stage.Placement;
             _phase = CalibrationPhase.Idle;
 
-            set.SuppressContent = _stage == Stage.Calibration;
+            // 단계마다 기본값으로 되돌린다. 뒤집어 둔 것을 다음 단계까지 끌고 가면
+            // "왜 안 보이지" 를 단계 전환 때마다 다시 겪는다.
+            _showContent = _stage == Stage.Placement;
 
             if (_stage == Stage.Placement)
             {
@@ -207,7 +247,18 @@ namespace StoryRest.ArUco
         void HandleCommonKeys(ArUcoSet set)
         {
             if (Input.GetKeyDown(cameraPreviewKey))
+            {
                 set.CameraPreviewEnabled = !set.CameraPreviewEnabled;
+
+                // 편집모드를 나가도 유지되어야 하므로 파일에 남긴다.
+                MarkDirty();
+            }
+
+            if (Input.GetKeyDown(contentKey)) _showContent = !_showContent;
+
+            // 두 단계 모두 여기서 정한다. 보정 중에도 콘텐츠를 띄워 두고
+            // 조준점과 실제 투사 위치가 함께 맞는지 볼 수 있어야 한다.
+            set.SuppressContent = !_showContent;
 
             if (Input.GetKeyDown(outlineKey))
                 set.Tracker.DrawDetectedMarkers = !set.Tracker.DrawDetectedMarkers;
@@ -316,7 +367,9 @@ namespace StoryRest.ArUco
 
         void UpdateCalibration(ArUcoSet set)
         {
-            set.SuppressContent = true;
+            // 이 단계에서는 마커를 고르지 않는다. 콘텐츠를 띄워 둔 채로 넘어오면
+            // 배치에서 켜 둔 하이라이트가 그대로 남는다.
+            set.HighlightMarkerId = -1;
 
             var calibration = set.Config.calibration;
             var projectorPoints = calibration.projectorPoints;
@@ -605,7 +658,12 @@ namespace StoryRest.ArUco
 
             _builder.AppendLine();
             _builder.AppendLine($"<color=#888888>{cameraPreviewKey} 카메라영상 {(set.CameraPreviewEnabled ? "끄기" : "켜기")}" +
+                                $" · {contentKey} 콘텐츠 {(_showContent ? "숨기기" : "보이기")}" +
                                 $" · {outlineKey} 마커테두리 · {reloadContentKey} 콘텐츠 다시읽기</color>");
+
+            // 나가도 계속 투사되는 값이라 켜 둔 채로 자리를 뜨기 쉽다. 눈에 띄게 남긴다.
+            if (set.CameraPreviewEnabled)
+                _builder.AppendLine("<color=#ffd633>카메라영상이 켜져 있습니다 — 편집모드를 나가도 계속 투사됩니다.</color>");
 
             var visible = set.VisibleMarkerIds;
             _builder.Append(visible.Count > 0

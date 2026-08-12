@@ -129,6 +129,14 @@ namespace StoryRest.ArUco
         public CameraConfig camera = new CameraConfig();
         public CalibrationConfig calibration = new CalibrationConfig();
 
+        // 카메라가 보는 영상을 이 세트의 화면에 반투명으로 깔지.
+        //
+        // 편집모드를 나가도 유지된다 — 인쇄한 마커가 실제로 잡히는지, 초점과 조명이 충분한지는
+        // 전시 상태 그대로 두고 보는 편이 빠르기 때문이다. 세트마다 카메라가 다르므로 값도 세트에 둔다.
+        //
+        // 전시 중에는 반드시 꺼 둔다. 프로젝터가 실물 책자 위에 카메라 영상을 겹쳐 쏜다.
+        public bool showCameraPreview = false;
+
         // 이 세트의 모든 콘텐츠에 공통으로 곱해지는 배율. 현장에서 전체 크기를 한 번에 맞출 때 쓴다.
         public float globalScale = 1f;
 

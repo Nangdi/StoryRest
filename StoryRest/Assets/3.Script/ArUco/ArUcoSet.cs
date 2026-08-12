@@ -30,15 +30,26 @@ namespace StoryRest.ArUco
         public ArUcoProjectionView View => _view;
 
         /// <summary>
-        /// 켜면 콘텐츠를 그리지 않는다. 캘리브레이션 중에 영상이 화면을 가리지 않게 하려는 것이다.
+        /// 켜면 콘텐츠를 그리지 않는다. 편집모드가 정한다 —
+        /// 캘리브레이션 중에는 조준점이 가려지지 않게 기본으로 켜지고, 필요하면 사람이 뒤집는다.
+        /// 마커 추적은 그대로 돌아가므로 어느 마커가 잡히는지는 계속 볼 수 있다.
         /// </summary>
         public bool SuppressContent { get; set; }
 
-        /// <summary>편집모드에서만 카메라 영상을 만든다. 평상시에는 투사하지 않으므로 꺼 둔다.</summary>
+        /// <summary>
+        /// 카메라 영상을 화면에 깔지. 편집모드 밖에서도 동작하며 값은 설정에 남는다
+        /// (→ SetConfig.showCameraPreview). 켜져 있는 동안만 프레임을 텍스처로 올린다.
+        /// </summary>
         public bool CameraPreviewEnabled
         {
-            get => _tracker != null && _tracker.ProducePreviewTexture;
-            set { if (_tracker != null) _tracker.ProducePreviewTexture = value; }
+            get => _set != null && _set.showCameraPreview;
+            set
+            {
+                if (_set == null) return;
+
+                _set.showCameraPreview = value;
+                if (_tracker != null) _tracker.ProducePreviewTexture = value;
+            }
         }
 
         /// <summary>편집 중인 마커에 판을 깔아 어느 것을 조정 중인지 보이게 한다. -1 이면 표시 안 함.</summary>
@@ -72,8 +83,8 @@ namespace StoryRest.ArUco
             _tracker = gameObject.AddComponent<ArUcoMarkerTracker>();
             ApplyConfigToTracker();
 
-            // 프로젝터에는 카메라 영상을 쏘지 않는다. 프리뷰는 편집모드에서만 켠다.
-            _tracker.ProducePreviewTexture = false;
+            // 전시 중에는 프로젝터에 카메라 영상을 쏘지 않는다. 설정으로 켠 세트만 프레임을 올린다.
+            _tracker.ProducePreviewTexture = _set.showCameraPreview;
             _tracker.Open();
         }
 
