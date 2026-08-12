@@ -115,6 +115,14 @@ namespace StoryRest.ArUco
         // 로그와 편집모드 HUD 에 표시할 이름. "A", "B" 처럼 짧게 둔다.
         public string name = "A";
 
+        // 이 세트를 쓰는 층. 비워 두면 모든 층에서 쓴다.
+        //
+        // 층마다 장비 수가 다르므로(1층 카메라 1대, 2·3층 2대) 세트를 전부 적어 두고
+        // 여기서 골라 쓴다. Setting.json 의 floor 만 바꾸면 그 층 구성으로 뜬다.
+        // 층수로 세트 수를 추론하지 않고 이 목록을 보는 이유는, 나중에 1층에 카메라를
+        // 더 달아도 코드가 아니라 이 값만 고치면 되게 하기 위해서다.
+        public int[] floors = new int[0];
+
         // 이 세트가 투사할 Unity 디스플레이 번호. 0 = 주 디스플레이.
         public int displayIndex = 0;
 
@@ -240,12 +248,42 @@ namespace StoryRest.ArUco
         public float adjustScaleStep = 0.02f;
         public float adjustRotationStep = 1f;
 
-        // 세트 수는 이 배열이 결정한다. 층수로 추론하지 않는다.
-        // (1층은 1개, 2·3층은 2개지만 설치가 바뀌어도 코드를 고치지 않기 위함)
+        // 설치할 수 있는 세트를 전부 적어 두고, 각 세트의 floors 로 층을 고른다.
+        // 실제로 만들어지는 세트 수 = 이 층에서 쓰는 항목 수.
+        //
+        // 기본값은 계획된 설치 구성이다.
+        //   1층 — 프로젝터 3대: ArUco 0번        + 키워드 월 1, 2번
+        //   2·3층 — 프로젝터 4대: ArUco 0, 1번   + 키워드 월 2, 3번
         public List<SetConfig> sets = new List<SetConfig>
         {
-            new SetConfig { name = "A", displayIndex = 0, camera = new CameraConfig { deviceId = 0 } },
+            new SetConfig
+            {
+                name = "A",
+                floors = new[] { 1, 2, 3 },
+                displayIndex = 0,
+                camera = new CameraConfig { deviceId = 0 },
+            },
+            new SetConfig
+            {
+                name = "B",
+                floors = new[] { 2, 3 },
+                displayIndex = 1,
+                camera = new CameraConfig { deviceId = 1 },
+            },
         };
+
+        /// <summary>이 층에서 실제로 쓰는 세트만 골라 준다.</summary>
+        public List<SetConfig> SetsForFloor(int floor)
+        {
+            var result = new List<SetConfig>();
+            if (sets == null) return result;
+
+            foreach (var set in sets)
+            {
+                if (set != null && set.IsUsedOnFloor(floor)) result.Add(set);
+            }
+            return result;
+        }
 
         public bool IsCalibrationMarker(int id)
         {
@@ -257,7 +295,7 @@ namespace StoryRest.ArUco
         /// 현장에서 손으로 고치다 생기는 실수를 잡는다.
         /// 고칠 수 있는 것은 조용히 고치고, 사람이 결정해야 하는 것만 문제로 보고한다.
         /// </summary>
-        public void Validate(List<string> problems)
+        public void Validate(List<string> problems, int floor)
         {
             if (sets == null || sets.Count == 0)
             {
@@ -293,11 +331,15 @@ namespace StoryRest.ArUco
                     set.calibration.valid = false;
                 }
 
+                // 이 층에서 쓰지 않는 세트는 만들어지지 않으므로 충돌 검사에서 뺀다.
+                // (세트 B 가 1층에서 쓰는 디스플레이와 겹쳐도, 1층에서 B 가 안 뜨면 문제가 아니다.)
+                if (!set.IsUsedOnFloor(floor)) continue;
+
                 // 세트끼리 카메라나 디스플레이를 공유하면 둘 다 정상 동작하지 않는다.
                 for (int j = i + 1; j < sets.Count; j++)
                 {
                     var other = sets[j];
-                    if (other?.camera == null) continue;
+                    if (other?.camera == null || !other.IsUsedOnFloor(floor)) continue;
 
                     if (set.camera.deviceId == other.camera.deviceId)
                         problems.Add($"세트 '{set.name}' 와 '{other.name}' 이 같은 카메라(deviceId={set.camera.deviceId})를 씁니다.");
@@ -305,6 +347,12 @@ namespace StoryRest.ArUco
                     if (set.displayIndex == other.displayIndex)
                         problems.Add($"세트 '{set.name}' 와 '{other.name}' 이 같은 디스플레이(displayIndex={set.displayIndex})를 씁니다.");
                 }
+            }
+
+            if (SetsForFloor(floor).Count == 0)
+            {
+                problems.Add($"{floor}층에서 쓸 세트가 없습니다. " +
+                             $"sets[].floors 에 {floor} 이 들어간 항목이 하나도 없습니다.");
             }
         }
     }

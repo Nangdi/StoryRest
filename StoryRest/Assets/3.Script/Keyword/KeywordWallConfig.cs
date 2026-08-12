@@ -20,6 +20,23 @@ namespace StoryRest.Keyword
     ///
     /// 관심사가 다르므로 aruco.json 과 파일을 나눈다(프로젝트가 port/tcp/Setting 을 나눠 쓰는 방식과 같다).
     /// </summary>
+    /// <summary>키워드 월 화면 하나. 프로젝터 한 대에 대응한다.</summary>
+    [Serializable]
+    public class WallScreen
+    {
+        public int displayIndex = 1;
+
+        // 이 화면을 쓰는 층. 비워 두면 모든 층에서 쓴다.
+        // 층마다 프로젝터 수가 달라 ArUco 세트가 차지하는 번호가 밀리므로 층별로 지정한다.
+        public int[] floors = new int[0];
+
+        public bool IsUsedOnFloor(int floor)
+        {
+            if (floors == null || floors.Length == 0) return true;
+            return Array.IndexOf(floors, floor) >= 0;
+        }
+    }
+
     [Serializable]
     public class KeywordWallConfig
     {
@@ -27,9 +44,16 @@ namespace StoryRest.Keyword
 
         public bool enabled = true;
 
-        // 키워드 월을 띄울 디스플레이. 프로젝터 2대가 기본이다(→ PROJECT_SPEC §2).
-        // ArUco 세트가 쓰는 디스플레이와 겹치면 안 된다.
-        public int[] displayIndexes = { 1, 2 };
+        // 설치할 수 있는 화면을 전부 적어 두고 floors 로 층을 고른다(→ ArUcoConfig.sets 와 같은 방식).
+        //
+        //   1층 — 프로젝터 3대: ArUco 0번      + 키워드 월 1, 2번
+        //   2·3층 — 프로젝터 4대: ArUco 0, 1번 + 키워드 월 2, 3번
+        public List<WallScreen> walls = new List<WallScreen>
+        {
+            new WallScreen { displayIndex = 1, floors = new[] { 1 } },
+            new WallScreen { displayIndex = 2, floors = new[] { 1, 2, 3 } },
+            new WallScreen { displayIndex = 3, floors = new[] { 2, 3 } },
+        };
 
         // 한 화면에 동시에 떠 있는 키워드 수.
         public int maxOnScreen = 16;
@@ -112,6 +136,19 @@ namespace StoryRest.Keyword
             {
                 Debug.LogError($"[Keyword] 설정 파일을 쓰지 못했습니다: {Path}\n{e.Message}");
             }
+        }
+
+        /// <summary>이 층에서 실제로 띄우는 화면만 골라 준다.</summary>
+        public List<WallScreen> WallsForFloor(int floor)
+        {
+            var result = new List<WallScreen>();
+            if (!enabled || walls == null) return result;
+
+            foreach (var wall in walls)
+            {
+                if (wall != null && wall.IsUsedOnFloor(floor)) result.Add(wall);
+            }
+            return result;
         }
 
         /// <summary>손으로 고치다 뒤집힌 값(최소 &gt; 최대 등)을 바로잡는다.</summary>
