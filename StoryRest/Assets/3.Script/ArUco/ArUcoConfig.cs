@@ -23,6 +23,13 @@ namespace StoryRest.ArUco
         public int height = 720;
         public int fps = 30;
 
+        // 카메라가 내보낼 픽셀 포맷 4글자. 빈 값이면 드라이버 기본값을 쓴다.
+        //
+        // 지정하지 않으면 대부분의 UVC 카메라가 무압축 YUY2 를 고르는데, USB 대역폭 때문에
+        // 720p 에서 10fps 까지 떨어진다. 캡처는 워커 스레드에서 돌지만(→ ARCHITECTURE §6)
+        // 마커 반응 속도는 그대로 카메라 fps 를 따라가므로 MJPG 로 열어 둔다.
+        public string fourcc = "MJPG";
+
         // 거울 효과용이 아니다. ArUco 는 좌우 반전된 마커를 인식하지 못하므로,
         // 카메라가 애초에 거울상을 내보낼 때 바로잡는 용도로만 쓴다.
         public bool flipHorizontal = false;
@@ -94,12 +101,123 @@ namespace StoryRest.ArUco
         // 마커를 비뚤게 인쇄·부착했을 때 보정할 각도(도).
         public float rotationOffset = 0f;
 
+        // 이 마커 폴더 안의 파일별 배치. 한 마커가 영상과 이미지를 함께 띄우므로
+        // (→ SPEC §4) 장마다 어디에 놓을지가 따로 필요하다.
+        //
+        // 위 마커 값은 "이 마커의 콘텐츠 전체"를 움직이고, 여기 값은 한 장만 움직인다.
+        // 콘텐츠가 한 장뿐인 마커는 이 목록을 신경 쓸 일이 없다(기본값이 마커 자리 그대로다).
+        public List<ContentPlacement> items = new List<ContentPlacement>();
+
         public void ResetPlacement()
         {
             scale = 1f;
             offsetX = 0f;
             offsetY = 0f;
             rotationOffset = 0f;
+        }
+
+        public ContentPlacement FindItem(string file)
+        {
+            if (items == null || string.IsNullOrEmpty(file)) return null;
+
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (items[i] != null && items[i].file == file) return items[i];
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 폴더에서 처음 본 파일의 항목을 만들어 둔다. 마커 항목과 마찬가지로 json 선편집을 요구하지 않는다.
+        /// </summary>
+        /// <param name="index">폴더 안 순번. 여러 장이 겹쳐 보이지 않게 기본 자리를 나누는 데 쓴다.</param>
+        public ContentPlacement GetOrCreateItem(string file, int index)
+        {
+            var found = FindItem(file);
+            if (found != null) return found;
+
+            items ??= new List<ContentPlacement>();
+
+            var created = new ContentPlacement { file = file };
+            created.ResetPlacement(index);
+            items.Add(created);
+            return created;
+        }
+    }
+
+    /// <summary>
+    /// 마커 폴더 안 파일 한 장의 배치. 키는 파일 이름이다.
+    ///
+    /// 파일 이름을 바꾸면 항목을 못 찾아 기본값으로 돌아간다. 폴더에서 사라진 파일의 항목은
+    /// 지우지 않고 남겨 둔다 — 되돌려 놓으면 맞춰 둔 값이 그대로 되살아난다.
+    /// </summary>
+    [Serializable]
+    public class ContentPlacement
+    {
+        // 확장자를 포함한 파일 이름. 경로가 아니다(층 폴더를 옮겨도 값이 유지된다).
+        public string file;
+
+        public bool enabled = true;
+
+        // 마커 값 위에 얹힌다. 크기는 곱하고, 위치와 각도는 더한다.
+        public float scale = 1f;
+        public float offsetX = 0f;
+        public float offsetY = 0f;
+        public float rotationOffset = 0f;
+
+        /// <param name="index">폴더 안 순번</param>
+        public void ResetPlacement(int index)
+        {
+            scale = 1f;
+            offsetX = DefaultOffsetX(index);
+            offsetY = 0f;
+            rotationOffset = 0f;
+        }
+
+        /// <summary>
+        /// 첫 장은 마커 자리 그대로 두고, 둘째 장부터 오른쪽으로 한 칸씩 밀어 둔다.
+        /// 전부 같은 자리에 겹쳐 뜨면 현장에서 "왜 한 장만 보이지" 로 시간을 버린다.
+        /// 콘텐츠가 하나뿐인 마커는 이 값이 0 이라 기존 동작과 같다.
+        /// </summary>
+        public static float DefaultOffsetX(int index) => index * 1.1f;
+    }
+
+    /// <summary>
+    /// 실제로 한 장을 그릴 때 쓰는 배치값. 세트 공통 → 마커 → 파일 순으로 쌓아 만든다.
+    ///
+    /// 그리는 쪽이 "이 값이 마커 것인지 파일 것인지" 를 알 필요가 없게 하려고 합쳐 넘긴다.
+    /// </summary>
+    public struct ArUcoPlacement
+    {
+        public float scale;
+        public float offsetX;
+        public float offsetY;
+        public float rotationOffset;
+
+        public static ArUcoPlacement Identity => new ArUcoPlacement { scale = 1f };
+
+        public static ArUcoPlacement Of(MarkerConfig marker)
+        {
+            return new ArUcoPlacement
+            {
+                scale = marker.scale,
+                offsetX = marker.offsetX,
+                offsetY = marker.offsetY,
+                rotationOffset = marker.rotationOffset,
+            };
+        }
+
+        /// <summary>마커 배치 위에 파일 한 장의 배치를 얹는다.</summary>
+        public static ArUcoPlacement Of(MarkerConfig marker, ContentPlacement item)
+        {
+            var placement = Of(marker);
+            if (item == null) return placement;
+
+            placement.scale *= item.scale;
+            placement.offsetX += item.offsetX;
+            placement.offsetY += item.offsetY;
+            placement.rotationOffset += item.rotationOffset;
+            return placement;
         }
     }
 
@@ -227,8 +345,40 @@ namespace StoryRest.ArUco
         // 세트 하나가 동시에 표시할 최대 마커 수. 0 = 제한 없음.
         public int maxSimultaneous = 0;
 
+        // 후보만 잡히고 인식이 안 될 때 전체 딕셔너리를 훑는 주기(프레임). 0 = 사용 안 함.
+        //
+        // 인쇄한 마커의 딕셔너리를 모를 때 답을 알려주는 진단 기능이다. 한 번 도는 데
+        // 720p 기준 약 140ms 가 들어(21개 딕셔너리 전수 검출) 켜 두면 카메라 프레임이 눈에 띄게 준다.
+        // dictionaryId 가 확정된 뒤에는 0 으로 둔다.
+        public int autoScanIntervalFrames = 0;
+
         // 세트 하나가 동시에 돌릴 영상 디코더 수. 층당 PC 1대 구성이라 상한을 둔다.
         public int maxConcurrentVideos = 4;
+
+        // ---- 관람 기준 (→ SPEC §5 재생 정책, ARCHITECTURE §5 관람 기록) ----
+        // 영상 재생 유지와 관람 카운트가 같은 값을 쓴다. "한 번 이어서 재생된 영상" 이 곧 "관람 1회" 다.
+
+        // 마커가 처음 잡힌 뒤 이 시간 동안 유지되어야 관람으로 센다.
+        // 그 전에 사라지면 책장을 넘기다 스친 것이거나 오인식으로 보고 세지 않는다.
+        public float viewMinDwellSeconds = 1f;
+
+        // 마커를 놓친 뒤 이 시간 안에 다시 잡히면 같은 관람이다 — 영상은 멈춘 자리에서 이어서 돈다.
+        // 넘기면 관람이 끝난 것이다 — 기록을 남기고 영상은 처음으로 되감는다.
+        // holdSeconds(콘텐츠를 계속 그려 두는 시간)보다 길어야 한다. 그 사이에는 콘텐츠가 숨고 영상만 멈춰 있다.
+        //
+        // 20초 — 책장을 넘기거나 옆 사람과 얘기하다 돌아오는 시간을 넉넉히 덮는다. 그보다 길면
+        // 다음 관람객이 앞사람이 보던 중간부터 보게 되고 그 사람은 세어지지 않는다.
+        public float viewResumeGraceSeconds = 20f;
+
+        // 관람을 파일로 남길지. persistentDataPath/stats/ 에 날짜별 CSV 로 쌓인다.
+        public bool recordViews = true;
+
+        // 메모리에 올려 둘 이미지 수. 세트끼리 함께 쓰는 캐시라 층 전체 기준이다.
+        //
+        // 이미지는 영상과 달리 디코딩 부하가 없어 상한이 화면 성능이 아니라 메모리에 걸린다.
+        // 1920x1080 한 장이 약 8MB 이므로 24장이면 200MB 남짓이다.
+        // 넘으면 화면에 없는 것 중 가장 오래된 것부터 놓아준다.
+        public int maxCachedImages = 24;
 
         // 캘리브레이션 전용으로 예약한 마커 ID. 콘텐츠 마커와 겹치면 안 된다.
         // 프로젝터가 이 ID 들을 투사하고 카메라가 그것을 읽어 대응점을 얻는다.
@@ -327,6 +477,10 @@ namespace StoryRest.ArUco
             warpSubdivisions = Mathf.Clamp(warpSubdivisions, 1, 32);
             maxSimultaneous = Mathf.Max(0, maxSimultaneous);
             maxConcurrentVideos = Mathf.Max(1, maxConcurrentVideos);
+            maxCachedImages = Mathf.Max(1, maxCachedImages);
+            viewMinDwellSeconds = Mathf.Max(0f, viewMinDwellSeconds);
+            // hold 안에 돌아오는 것은 놓친 적도 없는 것이다. grace 가 그보다 짧으면 의미가 없다.
+            viewResumeGraceSeconds = Mathf.Max(holdSeconds, viewResumeGraceSeconds);
             manualTargetSize = Mathf.Clamp(manualTargetSize, MinManualTargetSize, MaxManualTargetSize);
 
             for (int i = 0; i < sets.Count; i++)
@@ -343,6 +497,21 @@ namespace StoryRest.ArUco
                 set.calibration ??= new CalibrationConfig();
                 set.markers ??= new List<MarkerConfig>();
                 set.globalScale = Mathf.Max(0.05f, set.globalScale);
+
+                // 사람이 손으로 고친 json 이 그대로 들어온다. 그리는 쪽에서 null 을 만나지 않게 여기서 막는다.
+                foreach (var marker in set.markers)
+                {
+                    if (marker == null) continue;
+
+                    marker.scale = Mathf.Max(0.05f, marker.scale);
+                    marker.items ??= new List<ContentPlacement>();
+
+                    foreach (var item in marker.items)
+                    {
+                        if (item == null) continue;
+                        item.scale = Mathf.Max(0.05f, item.scale);
+                    }
+                }
 
                 // 캘리브레이션이 반쯤 채워진 상태로 남으면 엉뚱한 자리에 투사된다. 아예 무효로 돌린다.
                 if (set.calibration.valid && !set.calibration.IsUsable)

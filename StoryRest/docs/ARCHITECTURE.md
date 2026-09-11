@@ -162,10 +162,10 @@
 ```
 [Scene]
 └─ StoryRestApp                     ← 부트스트랩. 설정 읽고 나머지를 생성
-   │   AppConfig   (Setting.json → floor)
+   │   AppSettings (Setting.json → floor, role)
    │   ArUcoConfig (aruco.json   → sets[])
    │
-   ├─ Set_A                         ← ArUcoSet  (카메라 1 : 프로젝터 1)
+   ├─ Set_A                         ← ArUcoSet  (카메라 1 : 프로젝터 1)   role: all · aruco
    │  ├─ ArUcoMarkerTracker         카메라 캡처 + 마커 검출 (세트 전용 인스턴스)
    │  ├─ ArUcoContentLibrary        floor_<N>/<id>/ 스캔 + AVPro 플레이어 풀
    │  └─ ArUcoProjectionView        Camera(targetDisplay) + Canvas + 워프 UI 풀
@@ -173,11 +173,17 @@
    ├─ Set_B                         ← 2·3층에서만 생성 (sets[] 길이가 결정)
    │  └─ (동일 구성)
    │
-   ├─ KeywordWall_1                 ← 키워드 월 (내용 미정, 자리만 잡아둠)
-   ├─ KeywordWall_2
+   ├─ KeywordWall_0                 ← 키워드 월                            role: all · wall
+   ├─ KeywordWall_1
    │
-   └─ ArUcoAdjustMode               ← 편집모드. 세트를 골라 그 세트를 조정
+   ├─ ArUcoEditMode                 ← 편집모드. 세트를 골라 그 세트를 조정  (세트가 있을 때만)
+   ├─ ViewStatsServer               ← 관람 기록을 월 PC 로 보냄            role: aruco
+   └─ ViewStatsClient               ← ArUco PC 에서 관람 기록을 받아 미러  role: wall
 ```
+
+**역할 분기는 `StoryRestApp` 에서 끝난다.** `Setting.json` 의 `role` 을 읽어 세트를 만들지, 월을 만들지,
+링크를 어느 쪽으로 붙일지를 여기서만 정한다(`ActiveSets()` / `ActiveWalls()` / `CreateStatsLink()`).
+그 아래 컴포넌트는 자기가 어느 역할로 떴는지 모른다 — 세트는 세트 일만, 월은 월 일만 한다.
 
 ### 각 컴포넌트의 책임
 
@@ -186,7 +192,13 @@
 | `StoryRestApp` | 설정 로드, 세트 생성, 디스플레이 활성화 | **신규** |
 | `ArUcoSet` | 한 세트의 tracker/library/view를 묶고 매 프레임 연결 | **신규** (`ArUcoPageOverlay` 분해) |
 | `ArUcoMarkerTracker` | 캡처 + 검출 + 꼭짓점 스무딩 | **수정** (세트별 인스턴스화, 스레드화) |
-| `ArUcoContentLibrary` | 마커 ID → 영상. AVPro 플레이어 풀 | **신규** (`ArUcoImageLibrary` 대체) |
+| `ArUcoContentLibrary` | 경로 → 영상 텍스처. AVPro 플레이어 풀 | **신규** (`ArUcoImageLibrary` 대체) |
+| `ArUcoImageCache` | 경로 → 이미지 텍스처. 비동기 로드 + LRU. 세트 공유 | **신규** |
+| `ArUcoViewCounter` | 마커 관람 판정(유지 시간 · 복귀 유예). 세트별 | **신규** |
+| `ViewLog` (`Stats/`) | 관람 건별 CSV append/읽기. `persistentDataPath/stats/`. `Recorded` / `DayRewritten` 이벤트 | **신규** |
+| `ViewStatsServer` (`Stats/`) | role=aruco. TCP 로 대기, 적힌 줄을 그대로 월 PC 에 보냄. `sync` 요청에 하루치 응답 | **신규** |
+| `ViewStatsClient` (`Stats/`) | role=wall. `TcpClientChannel` 로 붙어 받은 줄을 미러 CSV 에 적음. 접속 시 31일치 재동기화 | **신규** |
+| `ArUcoStatsPanel` | 관람 기록 디버그 패널 (`F3`). 지금 세는 중인 마커 · 오늘 순위 | **신규** |
 | `ArUcoProjectionView` | `H_camproj` 적용 + 워프 메시 배치 + 디스플레이 출력 | **신규** (`ArUcoPageOverlay` 분해) |
 | `ArUcoHomography` | 4점 → 사영변환 | **그대로** |
 | `ArUcoWarpedImage` | 비사각형 텍스처 렌더 | **소폭 수정** (`Texture2D` → `Texture`) |
@@ -251,7 +263,7 @@ canvas.planeDistance = 1f;
 정합은 코너 보정(§1)과 마커 배치로 맞춘다.
 
 이 결정 덕에 평상시 `OpenCVMatUtils.MatToTexture2D` 호출이 사라진다(매 프레임 전체 프레임 GPU 업로드).
-층당 PC 1대 구성에서 가장 크게 절약되는 지점이다.
+ArUco PC 한 대가 세트 2개를 도는 구성에서 가장 크게 절약되는 지점이다.
 
 ---
 
@@ -260,10 +272,39 @@ canvas.planeDistance = 1f;
 ### `Setting.json` — 앱 전역
 
 ```json
-{ "floor": 1 }
+{ "floor": 1, "role": "all", "statsHost": "127.0.0.1", "statsPort": 5100 }
+```
+
+`aruco.json` 과 같이 `Application.persistentDataPath` 에서 읽는다(`AppSettings.Path`).
+`StreamingAssets/Setting.json` 은 첫 실행 때 복사되는 기본값이다.
+
+- `role` — `all` / `aruco` / `wall` (→ SPEC §2). 글자로 둔다(enum 을 그대로 직렬화하면 숫자가 되어 설치자가 못 읽는다).
+  모르는 값이면 `all` 로 뜨고 문제 목록에 올린다.
+- `help` — 설치자용 설명. JSON 엔 주석이 없어 값으로 싣는다. 읽을 때는 무시되고 저장할 때 같이 써져 사라지지 않는다.
+  `//` 로 시작하는 줄은 읽을 때 걷어내 주지만(메모를 적어도 파일이 깨지지 않게), 설정창에서 저장하면 사라진다.
+- `statsHost` / `statsPort` — 관람 기록 링크. `aruco` 가 `statsPort` 로 대기하고 `wall` 이 `statsHost:statsPort` 에 붙는다.
+
+### `keywordwall.json` — 월 화면 배정
+
+`walls[]` 항목마다 `displayIndex` 와 함께 `floors`(층) · `roles`(역할) 필터가 있다. 둘 다 비우면 어디서나 쓴다.
+역할 필터가 필요한 이유 — 월 PC 에는 세트가 없어 월이 **0번 디스플레이부터** 시작하고,
+한 PC 가 다 맡는 `all` 에서는 세트 뒤 번호로 밀린다. 같은 층이라도 역할에 따라 번호가 다르다.
+
+```json
+"walls": [
+  { "displayIndex": 1, "floors": [1],       "roles": ["all"]  },   // 1층 PC 1대: 세트 0 + 월 1, 2
+  { "displayIndex": 2, "floors": [1, 2, 3], "roles": ["all"]  },
+  { "displayIndex": 3, "floors": [2, 3],    "roles": ["all"]  },   // 2·3층을 한 PC 로 돌릴 때(포트가 생기면)
+  { "displayIndex": 0, "floors": [2, 3],    "roles": ["wall"] },   // 2·3층 월 PC: 월 0, 1
+  { "displayIndex": 1, "floors": [2, 3],    "roles": ["wall"] }
+]
 ```
 
 ### `aruco.json` — ArUco 관련 전부
+
+읽고 쓰는 파일은 `Application.persistentDataPath/aruco.json` 이다(`ArUcoConfigIO.Path`).
+`StreamingAssets/aruco.json`(`DefaultPath`)은 첫 실행 때 복사해 오는 기본값일 뿐이며,
+빌드를 새로 넣어도 현장 값이 남는 이유가 이것이다(→ SPEC §6).
 
 ```json
 {
@@ -287,6 +328,10 @@ canvas.planeDistance = 1f;
         "cameraPoints":    [[210,140],[1030,150],[1040,600],[205,595]],
         "valid": true
       },
+
+      "viewMinDwellSeconds": 1.0,
+      "viewResumeGraceSeconds": 20.0,
+      "recordViews": true,
 
       "globalScale": 1.0,
       "globalOffsetX": 0.0,
@@ -315,17 +360,44 @@ canvas.planeDistance = 1f;
 
 ---
 
-## 5. 콘텐츠 — AVPro Video
+### 설정 패널 (`ArUcoSettingsPanel`, ESC)
+
+씬의 ESC 설정창(`SettingsPanelUI`)에 실행할 때 줄을 덧붙인다. 씬은 건드리지 않는다.
+설치자가 현장에서 "느낌으로" 맞추는 값만 둔다 — 카메라 번호·디스플레이 배정처럼 잘못 건드리면 화면이
+사라지는 값은 `aruco.json` 을 직접 고치게 둔다.
+
+| 줄 | 값 | 적용 |
+|---|---|---|
+| 콘텐츠 유지 | `holdSeconds` | 즉시 |
+| 관람 최소 유지 | `viewMinDwellSeconds` | 즉시 |
+| 놓침 복귀 유예 | `viewResumeGraceSeconds` | 즉시 (영상 유지 + 관람 판정) |
+| 움직임 부드럽게 | `smoothing` | 즉시 |
+| 동시 표시 마커 수 | `maxSimultaneous` | 즉시 |
+| 원근 매핑 / 관람 기록 | `perspectiveMapping` / `recordViews` | 즉시 |
+| 이 PC 의 층 | `Setting.json` `floor` | **재시작 후** (저장만 하고 안내) |
+| 이 PC 의 역할 | `Setting.json` `role` | 창에서는 안 바꾼다 — 현재 역할과 링크 주소만 표시. PC 를 바꿔 꽂는 일이라 파일을 고치고 재시작 |
+
+값을 바꾸면 `ArUcoSet.ApplyConfig()` 가 살아 있는 트래커·플레이어 풀·카운터에 다시 밀어 넣고, 1초 뒤(또는 창을 닫을 때)
+`aruco.json` 에 저장한다. 창은 디스플레이 0(세트 A 프로젝터)에만 뜬다 — `SettingsCanvas` 가 거기 있다.
+
+## 5. 콘텐츠 — 영상 + 이미지
 
 ### 탐색
 
 ```
-StreamingAssets/floor_<N>/<마커ID>/<아무이름>.mp4
+StreamingAssets/floor_<N>/<마커ID>[_제목]/<아무이름>.{mp4|png|jpg|...}
 ```
 
-- 시작 시 `floor_<N>/` 하위 디렉터리를 훑어 이름이 정수인 것만 마커 ID로 등록한다.
-- 각 폴더에서 영상 확장자 파일 1개를 고른다. 여러 개면 첫 번째 + 경고(→ SPEC §4).
+- 시작 시 `floor_<N>/` 하위 디렉터리를 훑어 **이름이 숫자로 시작하는 것**을 마커 ID로 등록한다.
+  `17_별의일생` → 17번. 뒤쪽 글자는 사람이 읽으라고 두는 것이고 코드는 보지 않는다.
+  폴더가 층마다 70개씩 되므로, 숫자만 강제하면 어느 폴더가 뭔지 알 방법이 없어진다.
+- 같은 ID 를 가리키는 폴더가 둘이면(`17` 과 `17_별의일생`) 이름순 첫 번째만 쓰고 경고한다.
+- **폴더 안의 영상·이미지 파일을 전부** 이름순으로 등록한다. 한 마커가 여러 장을 갖는다.
+  종류는 확장자로 정한다 — `ContentKind.Video` / `Image`.
 - 편집모드 `F5`로 재스캔한다(현장에서 파일 교체 후 재실행 불필요).
+
+`ArUcoContentIndex` 가 돌려주는 것은 `마커 ID → List<ContentEntry>` 다.
+`ContentEntry` 는 `{ kind, path, fileName }` 이고, `fileName` 이 보정값(`items[].file`)의 키가 된다.
 
 ### 플레이어 풀
 
@@ -339,15 +411,80 @@ ArUcoContentLibrary
 ```
 
 - 풀 크기는 설정값. 기본은 세트당 4 정도로 두고 현장에서 조정한다.
-- 반납 시 `Stop()`. 재대여 시 `OpenMedia` + 처음부터 재생(→ SPEC §8 미확정 2의 가정).
+- **놓침과 끝남을 나눈다**(→ SPEC §5 재생 정책). `EndFrame()` 에서 이번 프레임에 그려지지 않은 슬롯은
+  `Pause()` 만 하고, `viewResumeGraceSeconds` 를 넘긴 슬롯만 반납한다(`Pause` + `Rewind`).
+  다시 요청되면 `TryGetFrame` 이 `Play()` 로 그 자리에서 이어 튼다. 파일은 닫지 않는다 — 여는 비용을 아낀다.
 - 오디오는 쓰지 않으므로 `AudioOutput`을 비활성화하고 볼륨 0으로 연다.
+- 슬롯은 **마커가 아니라 파일 경로로** 빌려준다. 한 마커가 영상을 두 개 가질 수 있기 때문이다.
 - AVPro 텍스처는 플랫폼에 따라 **상하 반전**될 수 있다.
   `TextureProducer.RequiresVerticalFlip()`을 읽어 UV의 v를 뒤집는다.
   → `ArUcoWarpedImage`에 `flipV` 플래그를 둔다.
 
+### 관람 기록
+
+```
+ArUcoSet ── 매 프레임 _visibleIds ──▶ ArUcoViewCounter (세트별)
+                                        마커별 Session { firstSeen, lastSeen, counted }
+                                        · firstSeen 후 minDwell 유지 → counted (관람 확정)
+                                        · lastSeen 후 resumeGrace 경과 → 종료 → ViewLog.Append
+                                      ViewLog ── append ──▶ persistentDataPath/stats/views_YYYY-MM-DD.csv
+```
+
+- 관람의 정의는 SPEC §5. 시간 기준을 `ArUcoContentLibrary` 와 같은 설정값에서 읽으므로
+  "영상이 이어졌다" 와 "같은 관람이다" 가 어긋나지 않는다.
+- 세트 하나에 카운터 하나. 세트는 마커 상태를 공유하지 않으므로(SPEC §2) 기록도 세트별로 남긴다.
+  같은 마커 ID 가 두 세트에 동시에 있으면 두 건이다 — 실제로 두 사람이 보고 있는 것이다.
+- 세는 것은 `_visibleIds`, 즉 그 프레임에 추적 중인 콘텐츠 마커 전부다(보정용 ID 제외).
+  콘텐츠 폴더가 비어 있어도 센다 — 어느 페이지를 펼쳤는지가 통계의 대상이지 파일 유무가 아니다.
+- 편집모드가 `SuppressViewCounting` 을 켜면 세지 않는다. 켜는 순간 진행 중이던 관람은 마저 적는다.
+- 종료(`OnDestroy`) 시 진행 중이던 관람을 그때까지의 시간으로 적는다. 전원이 끊기면 그 순간 보던 것만 잃는다.
+- 파일은 **append 만** 한다. 통째로 다시 쓰다 전원이 끊기면 지난 기록이 전부 날아갈 수 있기 때문이다.
+- 전시용 집계는 만들지 않았다. 순위 화면이 정해지면 이 CSV 들을 읽어 계산하는 쪽을 따로 붙인다.
+  `ViewLog.ReadDay` 와 `ArUcoStatsPanel`(F3 디버그 패널) 의 오늘 집계가 그 출발점이다.
+
+### 관람 기록 링크 — ArUco PC → 월 PC
+
+2·3층은 세트와 월이 다른 PC 다. 월 연출이 통계를 쓰려면 기록이 월 PC 로 건너가야 한다.
+
+```
+[aruco PC]                                        [wall PC]
+ViewLog.Append ─▶ CSV 원본                        ViewStatsClient ─▶ ViewLog.Append ─▶ CSV 미러
+      └─ Recorded ─▶ ViewStatsServer ── "view <csv줄>" ──▶   │                  └─ Recorded ─▶ (월 연출)
+                            ▲                                 │
+                            └──── "sync 2026-09-11" ──────────┘  접속할 때 최근 31일치 요청
+                            ──── "view …" ×N, "synced 2026-09-11 N" ──▶  ViewLog.WriteDay ─▶ DayRewritten
+```
+
+- **한 줄 텍스트 프로토콜.** CSV 에 적는 줄을 그대로 실어 보내므로 형식이 둘이 아니다.
+  `view <줄>` 한 건 · `sync <날짜>` 요청 · `synced <날짜> <건수>` 응답 끝.
+- **서버가 원본, 월 PC 는 미러.** 서버는 누가 무엇을 받았는지 기억하지 않는다. 월 PC 가 재시작하거나
+  선이 빠졌다 돌아오면 `sync` 로 다시 맞춘다. 하루치는 통째로 바꿔 쓰므로(`WriteDay`, 임시 파일 후 교체) 중복이 남지 않는다.
+  `sync` 응답 중에 실시간 `view` 가 먼저 오는 경우가 있어 클라이언트가 줄 단위로 거른다.
+- **연출 쪽은 역할을 모른다.** `all` 이든 `wall` 이든 `ViewLog.ReadDay` / `Recorded` / `DayRewritten` 만 보면 같은 것이 보인다.
+  파일로 남기므로 ArUco PC 가 잠깐 꺼져 있어도 지난 순위는 계속 낼 수 있다.
+- 연결이 없으면 서버는 파일에만 적는다. 잃는 것이 없다. 재접속 · 채널은 기존 `TcpClientChannel` 을 그대로 쓴다.
+- 검증(2026-09-11): 에디터 `role=aruco` + Python 클라이언트로 `sync` 19건 응답 확인,
+  `role=wall` + Python 가짜 서버로 31일 재동기화 · 중복 제거 · 실시간 append · 끊김 후 재접속 확인.
+
+### 이미지 캐시
+
+```
+ArUcoImageCache (StoryRestApp 이 하나만 만들어 모든 세트가 공유)
+  파일 경로 → Texture2D
+  UnityWebRequestTexture 로 비동기 로드 (디코딩이 워커 스레드에서 돈다)
+  maxCachedImages 초과 시 화면에 없는 것 중 가장 오래된 것부터 해제
+```
+
+이미지는 읽기 전용이라 세트끼리 공유해도 독립성이 깨지지 않는다. 같은 파일을 두 번 올리지 않으려고
+세트 밖에 둔다(마커·카메라 **상태**를 공유하는 것이 아니므로 SPEC §9 원칙과 충돌하지 않는다).
+
+동기 로드(`Texture2D.LoadImage`)를 쓰지 않는 이유는 디코딩이 메인 스레드를 잡아
+마커가 처음 잡히는 순간 화면이 끊기기 때문이다. 준비 전까지는 자리표시 색판이 뜬다.
+
 ### 렌더 경로
 
-`ArUcoWarpedImage.mainTexture`를 `Texture`로 올려 AVPro 텍스처를 그대로 물린다.
+`ArUcoWarpedImage.mainTexture`를 `Texture`로 올려 AVPro 텍스처나 `Texture2D` 를 그대로 물린다.
+**영상과 이미지가 여기서 하나로 합류한다** — 표시 코드는 종류를 구분하지 않는다.
 메시 생성 로직은 기존 것을 쓴다.
 
 **Windows 백엔드는 `RequiresVerticalFlip()`이 항상 true 다.** 실측으로 확인했다.
@@ -363,16 +500,18 @@ ArUcoContentLibrary
 
 ## 6. 스레딩과 성능
 
-층당 PC 1대가 최대 **4화면 + 카메라 2 + 영상 여러 개**를 감당해야 한다(→ SPEC §2).
+가장 무거운 PC 는 2·3층의 `aruco` PC 로 **2화면 + 카메라 2 + 영상 여러 개**를 감당해야 한다(→ SPEC §2).
+1층 `all` PC 는 여기에 키워드 월 2화면이 더해지지만 카메라는 1대다.
 
-### 캡처·검출을 워커 스레드로
+### 캡처·검출은 워커 스레드에서 돈다 (구현됨)
 
-현재 `ArUcoMarkerTracker.Update()`는 메인 스레드에서 `grab()` / `retrieve()` / `detectMarkers()`를
-모두 돌린다. `grab()`은 **블로킹**이다. 카메라 2대면 매 프레임 두 번 막힌다.
+`grab()`은 **블로킹**이다 — 다음 카메라 프레임이 도착할 때까지 돌아오지 않는다.
+메인 스레드에서 돌리면 렌더 프레임레이트가 카메라 프레임레이트에 그대로 묶이고,
+카메라가 2대면 매 프레임 두 번 막혀 반토막 난다.
 
 ```
 [워커 스레드 / 세트마다 1개]
-  grab → retrieve → cvtColor → detectMarkers
+  grab → retrieve → cvtColor(GRAY) → detectMarkers
   결과(네 꼭짓점 + ID)를 잠금으로 보호된 버퍼에 쓴다
 
 [메인 스레드]
@@ -382,14 +521,51 @@ ArUcoContentLibrary
 
 - OpenCV `Mat` 연산은 Unity API가 아니므로 워커에서 안전하다.
   `Texture2D` 업로드만 메인 스레드에서 한다.
+- 카메라를 여는 것도 워커가 한다. `open()`은 실패 시 재시도까지 수 초가 걸린다.
 - 스무딩은 메인 스레드에 남긴다. `Time.deltaTime` 기반이고 렌더 주기와 맞아야 한다.
+  **목표 위치와 현재 위치를 나눠 둔다** — 카메라 30fps, 화면 60fps 이상이라
+  새 검출이 없는 프레임에도 보간은 계속 나아가야 움직임이 끊기지 않는다.
+- 검출 입력은 그레이스케일이다. 컬러를 넘겨도 OpenCV가 안에서 같은 변환을 한다.
 - 검출 해상도는 표시 해상도와 무관하다. 720p로 충분하며, 필요하면 더 낮춘다.
+- 마커 상태(`_states`)는 메인 스레드만 만진다. 워커는 "이번 프레임에 이 ID가 여기 있었다"는
+  값만 넘긴다 — 잠금 구간이 배열 복사 하나로 끝난다.
+
+### 카메라는 MJPG로 연다
+
+`sets[].camera.fourcc`(기본 `MJPG`)를 해상도보다 **먼저** 지정한다.
+지정하지 않으면 대부분의 UVC 카메라가 무압축 YUY2를 고르는데, USB 대역폭 때문에
+720p에서 10fps까지 떨어진다. 캡처가 워커에서 돌아도 마커 반응 속도는 카메라 fps를 따라가므로
+이쪽이 막히면 화면은 매끄러운데 콘텐츠가 굼뜬다.
+
+실제로 열린 포맷은 시작 로그와 편집모드 HUD에 그대로 뜬다(`카메라 1280x720 MJPG 30fps —
+실측 30fps · 검출 6.0ms · 대기 27.4ms`). 요청과 다르게 열렸거나 20fps 미만이면 경고를 남긴다.
+
+### 딕셔너리 자동 스캔은 꺼 둔다
+
+`autoScanIntervalFrames`(기본 0)는 인쇄한 마커의 딕셔너리를 모를 때 답을 알려주는 진단 기능이다.
+21개 딕셔너리를 전수 검출하므로 **720p 기준 1회 약 140ms**가 든다(실측).
+마커가 안 잡히고 후보 사각형만 있는 상태 — 즉 책자를 안 비춘 대부분의 시간 — 에서
+주기적으로 발동하므로, 켜 두면 카메라 프레임이 눈에 띄게 준다. `dictionaryId`가 확정된 뒤에는 0.
+
+### 실측값 (1280x720, RTX 5070 + OpenCV 5.0)
+
+| 구간 | 시간 |
+|---|---|
+| `detectMarkers` (aruco3 + subpix) | 5.6~6.3 ms |
+| `cvtColor` BGR→GRAY/RGB | 0.02~0.04 ms |
+| `ScanAllDictionaries` 1회 | **137 ms** |
+| 4K H.264 254Mbps 영상 CPU 디코딩 | 18 ms/프레임 |
+
+검출은 워커로 옮겨도 CPU를 쓴다. 카메라 2대면 코어 2개가 상시 6ms씩 돈다는 뜻이다.
+더 줄여야 하면 검출 해상도를 낮추는 것이 가장 효과가 크다.
 
 ### 그 밖에
 
 - 안 보이는 마커의 `MediaPlayer`는 정지 → 디코딩 부하 제거.
 - 평상시 카메라 프레임을 텍스처로 올리지 않음(→ §3).
 - `warpSubdivisions`는 마커당 (n+1)² 정점이다. 10이면 121개 — 문제없지만 무한정 올리지 않는다.
+- 콘텐츠 영상은 **투사 해상도에 맞춰 재인코딩해 넣는다.** 스톡 원본(4K 250Mbps 급)을 그대로 두면
+  파일 하나가 300MB를 넘고, 하드웨어 디코더가 거부하면 소프트웨어 디코딩으로 떨어진다.
 
 ---
 
@@ -405,17 +581,25 @@ ArUcoContentLibrary
 | `F2` | 단계 전환 (마커 배치 ↔ 코너 보정) |
 | `1`~`9` | 조정할 세트 선택 (세트가 여럿일 때) |
 | `Tab` / `Shift+Tab` | 마커 선택 |
-| `← → ↑ ↓` `+` `-` `[` `]` | 선택한 마커의 위치 · 크기 · 회전 |
-| `Ctrl` 병행 | 세트 전체 위치 · 크기 (`globalOffsetX/Y`, `globalScale`) |
+| `,` / `.` | 그 마커 안에서 조정할 콘텐츠 선택 (마커 전체 ↔ 파일 한 장) |
+| `← → ↑ ↓` `+` `-` | **세트 전체** 위치 · 크기 (`globalOffsetX/Y`, `globalScale`) — 마커를 고르지 않아도 됨 |
+| `Ctrl` + `← → ↑ ↓` `+` `-` `[` `]` | **선택한 대상**(마커 또는 파일 한 장)의 위치 · 크기 · 회전 |
 | `PageUp` / `PageDown` | 세트 전체 배율 |
 | `Space` | 코너 보정 진행 (자동 시작 → 수동 전환 → 점 확정 → 완료) |
 | `+` `-` (수동 보정 중) | 마커 놓을 자리 사각형 크기 (`manualTargetSize`) |
-| `Backspace` | 마커 초기화 / 보정값 지우기 |
+| `Backspace` / `Ctrl+Backspace` | 세트 전체 배치 초기화 / 선택한 대상 초기화 (보정 단계에서는 보정값 지우기) |
 | `C` `V` `D` `P` `F5` | 카메라영상 · 콘텐츠 표시 · 마커테두리 · 원근 · 콘텐츠 다시읽기 |
+| `H` | 안내판 자리 옮기기 (단계 기본 → 우상 → 우하 → 좌하 → 좌상 → 한 줄로 접기) |
 | `Enter` | 즉시 저장 |
 | `Shift` 병행 | 미세조정 |
 
 - HUD는 **선택한 세트의 화면에만** 뜬다. 다른 프로젝터는 전시 상태를 유지한다.
+- **맨키는 세트 전체, Ctrl 은 마커 하나.** 현장에서 가장 먼저 하는 일이 "전체를 책자 위로 밀기" 라
+  아무것도 고르지 않은 상태의 방향키가 그 일을 한다. 예외인 마커만 Tab 으로 골라 Ctrl 을 누른 채 손본다.
+- **조정 대상은 두 단계다.** 기본은 "마커 전체" 라 그 마커의 콘텐츠가 통째로 움직이고,
+  `,`/`.` 로 파일을 고르면 그 한 장만 움직인다(→ SPEC §6). 콘텐츠가 한 장뿐인 마커는
+  둘이 사실상 같으므로 예전처럼 Tab 으로 고르고 방향키만 누르면 된다.
+  HUD 에는 그 폴더의 파일 목록이 종류 표시(▶ 영상 / ▣ 이미지)와 함께 뜬다.
 - **콘텐츠 표시는 단계마다 기본값이 다르다** — 마커 배치는 보이고, 코너 보정은 숨긴다(조준점을 가리므로).
   `V`로 그 자리에서 뒤집을 수 있고, 단계를 바꾸면 기본값으로 돌아간다.
   보정 중에도 콘텐츠를 띄워 두면 조준점과 실제 투사 위치를 함께 볼 수 있다.
@@ -423,7 +607,18 @@ ArUcoContentLibrary
   밖에서 누르면 모든 세트가 함께 토글되고, 안에서 누르면 선택한 세트만 바뀐다.
   나머지 편집 상태(하이라이트·콘텐츠 숨김·마커 테두리)는 나갈 때 전부 전시 상태로 되돌린다.
 - 편집모드 밖에서 값을 바꾸는 키는 받지 않는다(→ SPEC §6). `C`는 표시 스위치라 예외로 둔다.
+- **`F3` — 관람 기록 디버그 패널**(`ArUcoStatsPanel`). 편집모드와 무관하게 켜고 끈다.
+  세트마다 그 세트 화면에 뜨며, 지금 잡힌 마커의 상태(대기 / 세어짐 / 놓침 유예)와
+  오늘 파일의 세트별 순위·평균 지속시간을 보여준다. 파일은 2초마다 다시 읽는다.
+  편집모드가 켜져 있는 동안은 HUD 자리를 내주고 숨었다가 나가면 다시 뜬다.
 - 코너 보정 중에는 **HUD를 화면 가운데로 옮긴다.** 좌상단에 두면 그쪽 조준점을 가린다.
+- **HUD 는 글 줄 수만큼만 높다**(`ContentSizeFitter`). 그래도 맞추려는 마커를 가리면 `H` 로 네 귀퉁이를 돌거나
+  한 줄로 접는다. 접어도 첫 줄(키 안내 · 저장 대기)은 남는다.
+- **방향키는 책자 기준이다.** offset 은 마커 평면 좌표라 `→` 는 마커 윗변(c0→c1) 방향, `↑` 는 마커 위쪽이다.
+  책자가 프로젝터 정면으로 놓여 있으면 화면 방향과 같고, 책자를 돌려 놓으면 함께 돈다 —
+  그래서 관람객이 책자를 어떻게 돌려도 콘텐츠는 페이지의 같은 자리에 머문다.
+  카메라가 프로젝터와 반대로 달려 있어도(180°) 보정 호모그래피가 흡수하므로 방향은 그대로다.
+  검증: 똑바로 / 90° 회전 / 카메라 180° + 보정 세 경우를 `ArUcoHomography` · `ArUcoProjection` 으로 직접 계산해 확인했다.
 - 저장은 **1.5초 무입력 시 자동 + `Enter` 즉시**. 전시장 PC는 예고 없이 꺼진다.
 - 평상시에는 어떤 편집 UI도 보이지 않는다(→ SPEC §6). 편집 UI는 처음 필요할 때 만든다.
 - `Esc`는 기존 `SettingsPanelUI`가, `S`/`E`는 `GameManager`가 쓰므로 피했다.
@@ -498,8 +693,13 @@ Game 뷰를 두 개 띄우면 동시에 볼 수도 있다. (`Display.Activate()`
 
 - 낱말 목록: **`floor_<N>/keywords.txt`** — 한 줄에 하나, `#`로 시작하면 주석.
   콘텐츠와 같은 층 폴더에 두어 층마다 다른 낱말을 쓸 수 있다. 메모장으로 고칠 수 있게 평문이다.
-- 동작 설정: **`keywordwall.json`** — 디스플레이 번호, 개수, 크기·속도·투명도 범위, 색상.
-- 좌표는 화면을 0~1로 보는 정규화 값이라 프로젝터 해상도가 달라도 같은 그림이 나온다.
+- 동작 설정: **`keywordwall.json`** — 디스플레이 번호(층·역할별, → §4), 개수, 크기·속도·투명도 범위, 색상.
+- 2·3층에서는 월 PC(`role=wall`)에서만 뜬다. ArUco PC 는 월을 만들지 않는다.
+- 좌표는 화면을 0~1로 보는 정규화 값이고, 글자 크기는 1920x1080 기준 픽셀을 `CanvasScaler`(ScaleWithScreenSize)로
+  화면에 맞춰 배율한다. 그래서 프로젝터 해상도가 서로 달라도(또는 창이 작아도) 같은 그림이 나온다.
+  픽셀 그대로 두었을 때는 작은 화면에서 낱말 16개가 들어갈 자리가 없어 서로 밀어내며 겹치고 떨렸다(2026-09-11 수정).
+- 캔버스 크기는 만든 프레임에 바로 정해지지 않는다. `Canvas.ForceUpdateCanvases()` 를 한 번 부른 뒤 첫 낱말을 놓아야
+  크기(halfSize)가 실제 화면 기준으로 계산된다.
 - 시간은 `unscaledDeltaTime`을 쓴다. `GameManager`가 `Time.timeScale`을 만지므로
   배경 화면이 거기 끌려가면 안 된다.
 

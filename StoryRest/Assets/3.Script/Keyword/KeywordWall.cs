@@ -19,6 +19,11 @@ namespace StoryRest.Keyword
         // ArUco 세트 카메라와 겹치지 않도록 반대 방향으로 떨어뜨린다.
         const float WallSeparation = -10000f;
 
+        // 글자 크기(픽셀)와 개수는 이 해상도를 기준으로 정한 값이다. 실제 화면이 다르면 통째로 배율을 맞춘다.
+        // 두 프로젝터 해상도가 달라도(또는 창이 작아도) 같은 그림이 나오게 하기 위해서다 — 픽셀 그대로 두면
+        // 작은 화면에서는 같은 낱말 16개가 들어갈 자리가 없어 서로 밀어내며 겹치고 떨린다.
+        static readonly Vector2 ReferenceResolution = new Vector2(1920f, 1080f);
+
         class Item
         {
             public TMP_Text label;
@@ -111,10 +116,16 @@ namespace StoryRest.Keyword
             canvas.planeDistance = 1f;
 
             var scaler = canvasGo.GetComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
-            scaler.scaleFactor = 1f;
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = ReferenceResolution;
+            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+            scaler.matchWidthOrHeight = 0.5f;
 
             _canvasRect = canvasGo.GetComponent<RectTransform>();
+
+            // 캔버스 크기는 다음 레이아웃 때에야 정해진다. 지금 바로 낱말을 놓으려면 먼저 한 번 갱신해 두어야
+            // 첫 낱말들의 크기(halfSize)가 실제 화면 기준으로 계산된다. 안 그러면 전부 대충값으로 태어난다.
+            Canvas.ForceUpdateCanvases();
         }
 
         Item CreateItem(int index)

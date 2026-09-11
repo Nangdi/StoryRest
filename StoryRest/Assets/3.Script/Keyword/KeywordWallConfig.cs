@@ -30,10 +30,21 @@ namespace StoryRest.Keyword
         // 층마다 프로젝터 수가 달라 ArUco 세트가 차지하는 번호가 밀리므로 층별로 지정한다.
         public int[] floors = new int[0];
 
-        public bool IsUsedOnFloor(int floor)
+        // 이 화면을 쓰는 역할("all" / "wall"). 비워 두면 역할을 가리지 않는다.
+        // 월 PC(wall)에는 ArUco 세트가 없어 월이 0번 디스플레이부터 시작하고,
+        // 한 PC 가 다 맡는 all 에서는 세트 뒤 번호로 밀린다. 같은 층이라도 역할에 따라 번호가 다르다.
+        public string[] roles = new string[0];
+
+        public bool IsUsedOn(int floor, AppRole role)
         {
-            if (floors == null || floors.Length == 0) return true;
-            return Array.IndexOf(floors, floor) >= 0;
+            if (floors != null && floors.Length > 0 && Array.IndexOf(floors, floor) < 0) return false;
+            if (roles == null || roles.Length == 0) return true;
+
+            foreach (string name in roles)
+            {
+                if (AppSettings.TryParseRole(name, out var parsed) && parsed == role) return true;
+            }
+            return false;
         }
     }
 
@@ -44,15 +55,18 @@ namespace StoryRest.Keyword
 
         public bool enabled = true;
 
-        // 설치할 수 있는 화면을 전부 적어 두고 floors 로 층을 고른다(→ ArUcoConfig.sets 와 같은 방식).
+        // 설치할 수 있는 화면을 전부 적어 두고 floors · roles 로 고른다(→ ArUcoConfig.sets 와 같은 방식).
         //
-        //   1층 — 프로젝터 3대: ArUco 0번      + 키워드 월 1, 2번
-        //   2·3층 — 프로젝터 4대: ArUco 0, 1번 + 키워드 월 2, 3번
+        //   1층 (all)    — PC 1대, 프로젝터 3대: ArUco 0번 + 키워드 월 1, 2번
+        //   2·3층 (wall) — 월 PC, 프로젝터 2대: 키워드 월 0, 1번  (ArUco PC 는 월을 띄우지 않는다)
+        //   2·3층 (all)  — 포트가 넉넉해 PC 1대로 돌릴 때: ArUco 0, 1번 + 키워드 월 2, 3번
         public List<WallScreen> walls = new List<WallScreen>
         {
-            new WallScreen { displayIndex = 1, floors = new[] { 1 } },
-            new WallScreen { displayIndex = 2, floors = new[] { 1, 2, 3 } },
-            new WallScreen { displayIndex = 3, floors = new[] { 2, 3 } },
+            new WallScreen { displayIndex = 1, floors = new[] { 1 },       roles = new[] { "all" } },
+            new WallScreen { displayIndex = 2, floors = new[] { 1, 2, 3 }, roles = new[] { "all" } },
+            new WallScreen { displayIndex = 3, floors = new[] { 2, 3 },    roles = new[] { "all" } },
+            new WallScreen { displayIndex = 0, floors = new[] { 2, 3 },    roles = new[] { "wall" } },
+            new WallScreen { displayIndex = 1, floors = new[] { 2, 3 },    roles = new[] { "wall" } },
         };
 
         // 한 화면에 동시에 떠 있는 키워드 수.
@@ -138,15 +152,15 @@ namespace StoryRest.Keyword
             }
         }
 
-        /// <summary>이 층에서 실제로 띄우는 화면만 골라 준다.</summary>
-        public List<WallScreen> WallsForFloor(int floor)
+        /// <summary>이 층 · 이 역할에서 실제로 띄우는 화면만 골라 준다. 월을 안 띄우는 역할이면 비어 있다.</summary>
+        public List<WallScreen> WallsFor(int floor, AppRole role)
         {
             var result = new List<WallScreen>();
-            if (!enabled || walls == null) return result;
+            if (!enabled || walls == null || !AppSettings.HasWall(role)) return result;
 
             foreach (var wall in walls)
             {
-                if (wall != null && wall.IsUsedOnFloor(floor)) result.Add(wall);
+                if (wall != null && wall.IsUsedOn(floor, role)) result.Add(wall);
             }
             return result;
         }

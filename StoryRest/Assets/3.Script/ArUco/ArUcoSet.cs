@@ -15,19 +15,32 @@ namespace StoryRest.ArUco
         ArUcoConfig _config;
         SetConfig _set;
         ArUcoContentIndex _content;
+        ArUcoImageCache _images;
 
         ArUcoMarkerTracker _tracker;
         ArUcoProjectionView _view;
         ArUcoContentLibrary _library;
+        ArUcoViewCounter _views;      // recordViews 가 꺼져 있으면 null
+        int _floor;
 
         bool _projectionReady;
         bool _previewProjectionReady;
 
         readonly List<int> _visibleIds = new List<int>();
 
+        // debugPreviewContent 격자용. 매 프레임 새로 담되 할당은 하지 않는다.
+        readonly List<(int markerId, ContentEntry entry)> _previewEntries
+            = new List<(int markerId, ContentEntry entry)>();
+
         public SetConfig Config => _set;
         public ArUcoMarkerTracker Tracker => _tracker;
         public ArUcoProjectionView View => _view;
+
+        /// <summary>이번 실행에서 센 관람 수. 기록을 끄면 -1.</summary>
+        public int ViewsCountedThisRun => _views?.CountedThisRun ?? -1;
+
+        /// <summary>관람 카운터. 기록을 끄면 null. 디버그 패널이 읽는다.</summary>
+        public ArUcoViewCounter Views => _views;
 
         /// <summary>
         /// 켜면 콘텐츠를 그리지 않는다. 편집모드가 정한다 —
@@ -52,8 +65,30 @@ namespace StoryRest.ArUco
             }
         }
 
+        /// <summary>
+        /// 켜면 관람을 세지 않는다. 편집모드가 켠다 — 설치자가 배치를 맞추느라 올려 둔 마커는 관람이 아니다.
+        /// 켜는 순간 진행 중이던 관람은 끊긴 것으로 보고 마저 기록한다.
+        /// </summary>
+        public bool SuppressViewCounting
+        {
+            get => _suppressViewCounting;
+            set
+            {
+                if (_suppressViewCounting == value) return;
+                _suppressViewCounting = value;
+                if (value) _views?.Flush();
+            }
+        }
+        bool _suppressViewCounting;
+
         /// <summary>편집 중인 마커에 판을 깔아 어느 것을 조정 중인지 보이게 한다. -1 이면 표시 안 함.</summary>
         public int HighlightMarkerId { get; set; } = -1;
+
+        /// <summary>
+        /// 편집 중인 콘텐츠의 폴더 안 순번. -1 이면 마커 전체(= 그 마커의 콘텐츠가 통째로 움직인다).
+        /// 한 마커가 영상과 이미지를 함께 띄우므로 어느 장을 만지는 중인지 보여야 한다.
+        /// </summary>
+        public int HighlightItemIndex { get; set; } = -1;
 
         /// <summary>이번 프레임에 보이는 마커들. 화면상 큰 것부터 정렬되어 있다(편집모드에서 고를 때 쓴다).</summary>
         public IReadOnlyList<int> VisibleMarkerIds => _visibleIds;
@@ -62,11 +97,16 @@ namespace StoryRest.ArUco
         /// 실제로 출력할 디스플레이. 보통 set.displayIndex 지만, 에디터 분할 프리뷰에서는 0 이 넘어온다.
         /// </param>
         public void Initialize(ArUcoConfig config, SetConfig set, ArUcoContentIndex content,
-                               int setIndex, Rect viewport, int displayIndex)
+                               ArUcoImageCache images, int floor, int setIndex, Rect viewport, int displayIndex)
         {
             _config = config;
             _set = set;
             _content = content;
+            _images = images;
+            _floor = floor;
+
+            if (config.recordViews)
+                _views = new ArUcoViewCounter(floor, set.name, config.viewMinDwellSeconds, config.viewResumeGraceSeconds);
 
             _view = gameObject.AddComponent<ArUcoProjectionView>();
             _view.Setup(set.name, displayIndex, viewport, setIndex);
@@ -75,8 +115,7 @@ namespace StoryRest.ArUco
             // 영상 슬롯은 세트마다 따로 갖는다. 세트가 둘이면 디코더도 그만큼 늘어나므로
             // maxConcurrentVideos 는 "세트 하나당" 상한이라는 점에 유의한다.
             _library = new ArUcoContentLibrary(
-                content, transform, config.maxConcurrentVideos,
-                Mathf.Max(1.5f, config.holdSeconds * 3f));
+                transform, config.maxConcurrentVideos, config.viewResumeGraceSeconds);
 
             // 검출기는 세트마다 별도 인스턴스다. 같은 GameObject 에 둘을 붙일 수 없으므로
             // (DisallowMultipleComponent) 세트가 각자의 GameObject 를 갖는 구조여야 한다.
@@ -97,12 +136,42 @@ namespace StoryRest.ArUco
             _tracker.RequestedWidth = cam.width;
             _tracker.RequestedHeight = cam.height;
             _tracker.RequestedFps = cam.fps;
+            _tracker.RequestedFourcc = cam.fourcc;
             _tracker.FlipHorizontal = cam.flipHorizontal;
             _tracker.FlipVertical = cam.flipVertical;
 
             _tracker.DictionaryId = _config.dictionaryId;
             _tracker.Smoothing = _config.smoothing;
             _tracker.HoldSeconds = _config.holdSeconds;
+            _tracker.AutoScanIntervalFrames = _config.autoScanIntervalFrames;
+        }
+
+        /// <summary>
+        /// 설정 패널에서 값을 바꾼 뒤 호출한다. 재시작 없이 바뀌는 값을 살아 있는 객체에 다시 밀어 넣는다.
+        /// 카메라 해상도·디바이스 같은 값은 Open 때 한 번만 읽으므로 여기서는 바뀌지 않는다.
+        /// </summary>
+        public void ApplyConfig()
+        {
+            if (_tracker == null || _library == null || _config == null) return;
+
+            ApplyConfigToTracker();
+            _library.ResumeGraceSeconds = _config.viewResumeGraceSeconds;
+
+            if (_config.recordViews && _views == null)
+            {
+                _views = new ArUcoViewCounter(_floor, _set.name, _config.viewMinDwellSeconds, _config.viewResumeGraceSeconds);
+            }
+            else if (!_config.recordViews && _views != null)
+            {
+                _views.Flush();
+                _views = null;
+            }
+
+            if (_views != null)
+            {
+                _views.MinDwellSeconds = _config.viewMinDwellSeconds;
+                _views.ResumeGraceSeconds = _config.viewResumeGraceSeconds;
+            }
         }
 
         /// <summary>편집모드에서 보정값을 고친 뒤 호출한다.</summary>
@@ -167,6 +236,15 @@ namespace StoryRest.ArUco
             }
 
             DrawMarkers();
+
+            // 관람은 전시 상태에서 콘텐츠를 실제로 그린 프레임에서만 센다. 편집모드와 디버그 격자에서는 세지 않는다.
+            if (!_suppressViewCounting) _views?.Update(_visibleIds, Time.unscaledTime);
+        }
+
+        void OnDestroy()
+        {
+            // 종료 시점에 보고 있던 관람을 마저 적는다.
+            _views?.Flush();
         }
 
         void DrawMarkers()
@@ -201,33 +279,70 @@ namespace StoryRest.ArUco
                     _set.globalScale, new Vector2(_set.globalOffsetX, _set.globalOffsetY),
                     _config.warpSubdivisions, _config.perspectiveMapping);
 
-                bool hasContent = _content != null && _content.Has(marker.id);
-                bool showMissing = false;
+                var entries = _content != null ? _content.GetEntries(marker.id) : null;
 
-                if (_library.TryGetFrame(marker.id, out Texture texture, out bool flipV, out float aspect))
+                if (entries == null || entries.Count == 0)
                 {
-                    style.texture = texture;
-                    style.flipV = flipV;
-                    style.aspect = aspect;
-                    style.tint = Color.white;
+                    // 자리만 잡아 두면 현장에서 "인식은 되는데 콘텐츠가 없다"를 바로 구분할 수 있다.
+                    var empty = ArUcoPlacement.Of(markerConfig);
+
+                    style.texture = null;
+                    style.flipV = false;
+                    style.aspect = 1f;
+                    style.tint = PlaceholderColor(marker.id, false);
+
+                    if (_view.Draw(plane, empty, style)) drawn++;
+                    _view.DrawLabel(plane, empty, style, $"{marker.id}번 마커\n콘텐츠가 없습니다");
+
+                    if (marker.id == HighlightMarkerId) _view.DrawHighlight(plane, empty, style);
+                    continue;
                 }
-                else
+
+                bool any = false;
+
+                // 폴더 안의 파일을 전부 그린다. 이름순이라 나중 것이 위에 올라간다(→ SPEC §4).
+                for (int e = 0; e < entries.Count; e++)
                 {
-                    // 자리만 잡아 두면 현장에서 "인식은 되는데 영상이 없다"를 바로 구분할 수 있다.
-                    style.tint = PlaceholderColor(marker.id, hasContent);
+                    var entry = entries[e];
 
-                    // 등록된 영상이 아예 없는 경우에만 그 사실을 적는다.
-                    // 슬롯이 모자라거나 첫 프레임을 기다리는 중이면 곧 영상이 뜨므로 문구를 띄우지 않는다.
-                    showMissing = !hasContent;
+                    // 파일을 처음 본 순간 배치 항목이 생긴다. json 을 미리 손볼 필요가 없다.
+                    var item = markerConfig.GetOrCreateItem(entry.fileName, e);
+                    if (!item.enabled) continue;
+
+                    var placement = ArUcoPlacement.Of(markerConfig, item);
+
+                    if (TryGetTexture(entry, out Texture texture, out bool flipV, out float aspect))
+                    {
+                        style.texture = texture;
+                        style.flipV = flipV;
+                        style.aspect = aspect;
+                        style.tint = Color.white;
+                    }
+                    else
+                    {
+                        // 영상 슬롯을 기다리거나 이미지를 읽는 중이다. 곧 뜨므로 문구는 띄우지 않고
+                        // 자리만 색으로 잡아 둔다.
+                        style.texture = null;
+                        style.flipV = false;
+                        style.aspect = 1f;
+                        style.tint = PlaceholderColor(marker.id, true);
+                    }
+
+                    if (_view.Draw(plane, placement, style)) any = true;
+
+                    if (marker.id == HighlightMarkerId && e == HighlightItemIndex)
+                        _view.DrawHighlight(plane, placement, style);
                 }
 
-                if (_view.Draw(plane, markerConfig, style)) drawn++;
+                if (any) drawn++;
 
-                if (showMissing)
-                    _view.DrawLabel(plane, markerConfig, style, $"{marker.id}번 마커\n영상이 없습니다");
-
-                if (marker.id == HighlightMarkerId)
-                    _view.DrawHighlight(plane, markerConfig, style);
+                // 마커 전체를 고른 상태(-1)면 콘텐츠가 아니라 마커 자리를 표시한다.
+                if (marker.id == HighlightMarkerId && HighlightItemIndex < 0)
+                {
+                    style.texture = null;
+                    style.aspect = 1f;
+                    _view.DrawHighlight(plane, ArUcoPlacement.Of(markerConfig), style);
+                }
             }
 
             _view.EndFrame();
@@ -238,6 +353,24 @@ namespace StoryRest.ArUco
         public void ReloadContent()
         {
             _library.ReleaseAll();
+        }
+
+        /// <summary>
+        /// 콘텐츠 한 장의 이번 프레임 텍스처. 영상과 이미지가 갈라지는 유일한 자리다.
+        /// 아직 준비 전(영상 디코딩 / 이미지 로딩)이면 false 를 돌린다.
+        /// </summary>
+        bool TryGetTexture(ContentEntry entry, out Texture texture, out bool flipV, out float aspect)
+        {
+            if (entry.IsVideo) return _library.TryGetFrame(entry.path, out texture, out flipV, out aspect);
+
+            // 이미지는 AVPro 를 거치지 않으므로 상하 반전이 없다.
+            flipV = false;
+
+            if (_images != null) return _images.TryGet(entry.path, out texture, out aspect);
+
+            texture = null;
+            aspect = 1f;
+            return false;
         }
 
         /// <summary>
@@ -254,11 +387,19 @@ namespace StoryRest.ArUco
                 _previewProjectionReady = true;
             }
 
+            // 마커가 아니라 파일 단위로 늘어놓는다. 한 마커가 여러 장을 가질 수 있으므로
+            // 마커 단위로 그리면 정작 확인하려던 파일이 화면에 나오지 않는다.
+            _previewEntries.Clear();
+
             var ids = _content != null ? _content.MarkerIds : new List<int>();
+            foreach (int id in ids)
+            {
+                foreach (var entry in _content.GetEntries(id)) _previewEntries.Add((id, entry));
+            }
 
             _view.BeginFrame();
 
-            if (ids.Count == 0)
+            if (_previewEntries.Count == 0)
             {
                 _view.ShowStatus($"[디버그] 콘텐츠가 없습니다.\n{_content?.Root}");
                 _view.EndFrame();
@@ -266,19 +407,20 @@ namespace StoryRest.ArUco
                 return;
             }
 
-            _view.ShowStatus($"[디버그] 콘텐츠 미리보기 {ids.Count}개 — 전시 전에 debugPreviewContent 를 끄세요");
+            _view.ShowStatus($"[디버그] 콘텐츠 미리보기 — 마커 {ids.Count}개 · 파일 {_previewEntries.Count}개 " +
+                             $"— 전시 전에 debugPreviewContent 를 끄세요");
 
-            int columns = Mathf.CeilToInt(Mathf.Sqrt(ids.Count));
-            int rows = Mathf.CeilToInt(ids.Count / (float)columns);
+            int columns = Mathf.CeilToInt(Mathf.Sqrt(_previewEntries.Count));
+            int rows = Mathf.CeilToInt(_previewEntries.Count / (float)columns);
 
-            // 격자는 화면 좌표를 직접 쓰므로 세트 공통 배치를 적용하지 않는다.
-            // 여기서 확인하려는 것은 배치가 아니라 "영상 파일이 제대로 들어갔는지" 다.
-            var placement = new MarkerConfig { id = -1 };
+            // 격자는 화면 좌표를 직접 쓰므로 세트 공통 배치와 파일별 배치를 적용하지 않는다.
+            // 여기서 확인하려는 것은 배치가 아니라 "파일이 제대로 들어갔는지" 다.
+            var placement = ArUcoPlacement.Identity;
             var style = ArUcoDrawStyle.Default(1f, Vector2.zero, _config.warpSubdivisions, false);
 
-            for (int i = 0; i < ids.Count; i++)
+            for (int i = 0; i < _previewEntries.Count; i++)
             {
-                int id = ids[i];
+                var (id, entry) = _previewEntries[i];
 
                 float cellW = 1f / columns;
                 float cellH = 1f / rows;
@@ -295,7 +437,7 @@ namespace StoryRest.ArUco
                 var plane = ArUcoHomography.FromUnitSquare(p0, p1, p2, p3);
                 if (!plane.IsValid) continue;
 
-                if (_library.TryGetFrame(id, out Texture texture, out bool flipV, out float aspect))
+                if (TryGetTexture(entry, out Texture texture, out bool flipV, out float aspect))
                 {
                     style.texture = texture;
                     style.flipV = flipV;

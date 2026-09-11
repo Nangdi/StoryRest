@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
 using StoryRest.Keyword;
+using StoryRest.Stats;
 using UnityEngine;
 
 namespace StoryRest.ArUco
@@ -10,6 +11,10 @@ namespace StoryRest.ArUco
     ///
     /// 씬에는 이 컴포넌트 하나만 두면 된다. 세트 수와 장비 배정은 전부 aruco.json 이 결정하므로
     /// 층마다 다른 씬이나 다른 빌드를 만들지 않는다.
+    ///
+    /// 이 PC 가 무엇을 맡는지는 Setting.json 의 role 이 정한다(→ AppRole).
+    /// all 은 세트와 키워드 월을 다 띄우고, aruco 는 세트만 + 관람 기록 서버, wall 은 월만 + 관람 기록 클라이언트다.
+    /// 역할별 분기는 여기서 끝난다 — 아래 컴포넌트들은 자기가 어느 역할로 떴는지 모른다.
     /// </summary>
     [DisallowMultipleComponent]
     public class StoryRestApp : MonoBehaviour
@@ -17,8 +22,21 @@ namespace StoryRest.ArUco
         public static StoryRestApp Instance { get; private set; }
 
         public AppSettings Settings { get; private set; }
+
+        /// <summary>
+        /// 이번 실행이 실제로 쓰는 층. Settings.floor 는 설정 패널이 바꿀 수 있지만 층은 시작할 때만 읽으므로,
+        /// "저장은 됐는데 아직 적용 전" 을 구분하려면 시작 시점의 값을 따로 들고 있어야 한다.
+        /// </summary>
+        public int RunningFloor { get; private set; }
+
+        /// <summary>이번 실행의 역할. 층과 같은 이유로 시작 시점 값을 따로 든다.</summary>
+        public AppRole RunningRole { get; private set; }
+
         public ArUcoConfig Config { get; private set; }
         public ArUcoContentIndex Content { get; private set; }
+
+        /// <summary>이미지 텍스처 캐시. 읽기 전용이라 세트들이 함께 쓴다(→ ARCHITECTURE §5).</summary>
+        public ArUcoImageCache Images { get; private set; }
 
         /// <summary>설정에 문제가 있으면 여기에 남는다. 편집모드 HUD 에서 보여줄 수 있다.</summary>
         public IReadOnlyList<string> Problems => _problems;
@@ -27,6 +45,10 @@ namespace StoryRest.ArUco
         public IReadOnlyList<ArUcoSet> Sets => _sets;
 
         public KeywordWallConfig KeywordConfig { get; private set; }
+
+        /// <summary>관람 기록 링크. aruco 역할이면 서버, wall 역할이면 클라이언트, all 이면 둘 다 null.</summary>
+        public ViewStatsServer StatsServer { get; private set; }
+        public ViewStatsClient StatsClient { get; private set; }
 
         readonly List<string> _problems = new List<string>();
         readonly List<ArUcoSet> _sets = new List<ArUcoSet>();
@@ -42,14 +64,24 @@ namespace StoryRest.ArUco
             Instance = this;
 
             Settings = AppSettings.Load();
+            RunningFloor = Settings.floor;
+            RunningRole = Settings.Role;
+
+            if (!Settings.IsRoleValid)
+                _problems.Add($"Setting.json 의 role '{Settings.role}' 을 모릅니다(all / aruco / wall). all 로 진행합니다.");
 
             Config = ArUcoConfigIO.Load();
-            Config.Validate(_problems, Settings.floor);
-            ValidateCalibrationMarkers();
-
             Content = new ArUcoContentIndex();
-            Content.Rescan(Settings.ContentRoot);
-            ValidateContentMarkers();
+            Images = new ArUcoImageCache(this, Config.maxCachedImages);
+
+            // 월 PC 에는 카메라도 콘텐츠도 없다. ArUco 쪽 검증을 돌리면 "세트가 없다" 같은 헛된 경고만 남는다.
+            if (AppSettings.HasArUco(RunningRole))
+            {
+                Config.Validate(_problems, Settings.floor);
+                ValidateCalibrationMarkers();
+                Content.Rescan(Settings.ContentRoot);
+                ValidateContentMarkers();
+            }
 
             KeywordConfig = KeywordWallConfig.Load();
             ValidateDisplayAssignment();
@@ -58,6 +90,43 @@ namespace StoryRest.ArUco
             LogSummary();
             CreateSets();
             CreateKeywordWalls();
+            CreateStatsLink();
+        }
+
+        /// <summary>이번 실행에서 실제로 만드는 세트. 월 PC(wall)면 비어 있다.</summary>
+        List<SetConfig> ActiveSets()
+        {
+            return AppSettings.HasArUco(RunningRole)
+                ? Config.SetsForFloor(Settings.floor)
+                : new List<SetConfig>();
+        }
+
+        /// <summary>이번 실행에서 실제로 띄우는 키워드 월. ArUco PC(aruco)면 비어 있다.</summary>
+        List<WallScreen> ActiveWalls()
+        {
+            return KeywordConfig != null
+                ? KeywordConfig.WallsFor(Settings.floor, RunningRole)
+                : new List<WallScreen>();
+        }
+
+        /// <summary>
+        /// 관람 기록을 PC 사이에 나르는 링크. 2·3층은 세트와 월이 다른 PC 라 기록이 월 PC 로 건너가야 한다.
+        /// all 은 한 프로세스 안이라 파일을 바로 읽으면 되므로 아무것도 만들지 않는다.
+        /// </summary>
+        void CreateStatsLink()
+        {
+            switch (RunningRole)
+            {
+                case AppRole.ArUco:
+                    StatsServer = gameObject.AddComponent<ViewStatsServer>();
+                    StatsServer.Setup(Settings.statsPort);
+                    break;
+
+                case AppRole.Wall:
+                    StatsClient = gameObject.AddComponent<ViewStatsClient>();
+                    StatsClient.Setup(Settings.statsHost, Settings.statsPort);
+                    break;
+            }
         }
 
         /// <summary>
@@ -68,8 +137,8 @@ namespace StoryRest.ArUco
         {
             if (KeywordConfig == null || !KeywordConfig.enabled) return;
 
-            var walls = KeywordConfig.WallsForFloor(Settings.floor);
-            var sets = Config.SetsForFloor(Settings.floor);
+            var walls = ActiveWalls();
+            var sets = ActiveSets();
 
             foreach (var wall in walls)
             {
@@ -96,10 +165,7 @@ namespace StoryRest.ArUco
 
         void CreateKeywordWalls()
         {
-            var walls = KeywordConfig != null
-                ? KeywordConfig.WallsForFloor(Settings.floor)
-                : new List<WallScreen>();
-
+            var walls = ActiveWalls();
             if (walls.Count == 0) return;
 
             // 낱말 목록은 층 폴더에서 읽는다. 화면끼리 같은 목록을 공유한다.
@@ -125,7 +191,7 @@ namespace StoryRest.ArUco
         /// </summary>
         void CreateSets()
         {
-            var active = Config.SetsForFloor(Settings.floor);
+            var active = ActiveSets();
             if (active.Count == 0) return;
 
             int count = active.Count;
@@ -148,7 +214,7 @@ namespace StoryRest.ArUco
                 int displayIndex = splitPreview ? 0 : setConfig.displayIndex;
 
                 var set = go.AddComponent<ArUcoSet>();
-                set.Initialize(Config, setConfig, Content, i, viewport, displayIndex);
+                set.Initialize(Config, setConfig, Content, Images, Settings.floor, i, viewport, displayIndex);
                 _sets.Add(set);
             }
 
@@ -158,6 +224,12 @@ namespace StoryRest.ArUco
 
             // 편집모드는 세트가 다 만들어진 뒤에 붙인다. 평상시에는 아무것도 그리지 않는다.
             if (GetComponent<ArUcoEditMode>() == null) gameObject.AddComponent<ArUcoEditMode>();
+            if (GetComponent<ArUcoStatsPanel>() == null) gameObject.AddComponent<ArUcoStatsPanel>();
+
+            // ESC 설정창(씬에 있는 SettingsPanelUI)에 현장 조절값 줄을 덧붙인다. 창이 없는 씬이면 조용히 건너뛴다.
+            var settingsUi = FindObjectOfType<SettingsPanelUI>(true);
+            if (settingsUi != null && GetComponent<ArUcoSettingsPanel>() == null)
+                gameObject.AddComponent<ArUcoSettingsPanel>().Attach(settingsUi);
         }
 
         void OnDestroy()
@@ -240,6 +312,7 @@ namespace StoryRest.ArUco
             Content.Rescan(Settings.ContentRoot);
 
             // 열려 있던 파일을 놓아주지 않으면 교체된 파일이 반영되지 않는다.
+            Images?.ReleaseAll();
             for (int i = 0; i < _sets.Count; i++) _sets[i].ReloadContent();
         }
 
@@ -249,14 +322,12 @@ namespace StoryRest.ArUco
         /// </summary>
         void ActivateDisplays()
         {
-            foreach (var set in Config.SetsForFloor(Settings.floor))
+            foreach (var set in ActiveSets())
             {
                 ActivateDisplay(set.displayIndex, $"세트 '{set.name}'");
             }
 
-            if (KeywordConfig == null) return;
-
-            foreach (var wall in KeywordConfig.WallsForFloor(Settings.floor))
+            foreach (var wall in ActiveWalls())
             {
                 ActivateDisplay(wall.displayIndex, "키워드 월");
             }
@@ -281,13 +352,22 @@ namespace StoryRest.ArUco
         {
             var text = new StringBuilder(512);
 
-            var active = Config.SetsForFloor(Settings.floor);
-            var walls = KeywordConfig != null
-                ? KeywordConfig.WallsForFloor(Settings.floor)
-                : new List<WallScreen>();
+            var active = ActiveSets();
+            var walls = ActiveWalls();
 
-            text.AppendLine($"[StoryRest] {Settings.floor}층 · 세트 {active.Count}개 " +
-                            $"· 키워드 월 {walls.Count}개 · 콘텐츠 {Content.Count}개");
+            text.AppendLine($"[StoryRest] {Settings.floor}층 · 역할 {AppSettings.RoleName(RunningRole)} " +
+                            $"· 세트 {active.Count}개 · 키워드 월 {walls.Count}개 · 콘텐츠 마커 {Content.Count}개 " +
+                            $"(영상 {Content.VideoCount} · 이미지 {Content.ImageCount})");
+
+            switch (RunningRole)
+            {
+                case AppRole.ArUco:
+                    text.AppendLine($"  관람 기록 서버: 포트 {Settings.statsPort} 에서 월 PC 를 기다림");
+                    break;
+                case AppRole.Wall:
+                    text.AppendLine($"  관람 기록 클라이언트: ArUco PC {Settings.statsHost}:{Settings.statsPort} 에 접속");
+                    break;
+            }
 
             foreach (var set in active)
             {
@@ -299,7 +379,7 @@ namespace StoryRest.ArUco
             }
 
             // 이 층에서 안 쓰는 세트가 있으면 "왜 안 뜨지" 를 바로 알 수 있게 함께 남긴다.
-            if (Config.sets != null && Config.sets.Count > active.Count)
+            if (AppSettings.HasArUco(RunningRole) && Config.sets != null && Config.sets.Count > active.Count)
             {
                 foreach (var set in Config.sets)
                 {
@@ -310,9 +390,21 @@ namespace StoryRest.ArUco
                 }
             }
 
-            text.Append($"  설정 파일: {ArUcoConfigIO.Path}");
+            text.AppendLine($"  설정 파일: {ArUcoConfigIO.Path}");
+            text.AppendLine($"  층 설정: {AppSettings.Path}");
+            if (RunningRole == AppRole.Wall)
+                text.Append($"  관람 기록 미러: {ViewLog.Directory}");
+            else
+                text.Append(Config.recordViews
+                    ? $"  관람 기록: {ViewLog.Directory} " +
+                      $"(유지 {Config.viewMinDwellSeconds:0.#}초 이상 · 복귀 {Config.viewResumeGraceSeconds:0.#}초 이내)"
+                    : "  관람 기록: 꺼짐 (recordViews)");
 
             Debug.Log(text.ToString());
+
+            if (RunningRole == AppRole.ArUco && !Config.recordViews)
+                Debug.LogWarning("[StoryRest] recordViews 가 꺼져 있어 월 PC 로 보낼 관람 기록이 없습니다. " +
+                                 "aruco.json 의 recordViews 를 확인하세요.");
 
             // 점검용 값이라 켜 둔 채로 전시가 시작되기 쉽다. 설정 문제는 아니므로 problems 와 따로 남긴다.
             foreach (var set in active)

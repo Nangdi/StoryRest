@@ -51,12 +51,30 @@ AVPro 도 마찬가지로 `Runtime/Plugins/Windows/` 만 있으면 된다.
 
 | 파일 | 확인할 것 |
 |---|---|
-| `Assets/StreamingAssets/Setting.json` | `floor` 가 이 PC 가 설치될 층인지 |
-| `Assets/StreamingAssets/aruco.json` | 카메라 `deviceId`, `displayIndex`, 세트 개수 |
-| `Assets/StreamingAssets/keywordwall.json` | 키워드 월 `displayIndexes` 가 세트와 겹치지 않는지 |
+| `Assets/StreamingAssets/Setting.json` | `floor` 가 이 PC 가 설치될 층인지, `role` 이 이 PC 의 역할인지(아래 표) — **첫 실행 때 복사되는 기본값**. 실제 값은 아래 참고 |
+| `Assets/StreamingAssets/aruco.json` | 카메라 `deviceId`, `displayIndex`, 세트 개수 — **첫 실행 때 복사되는 기본값**. 실제 값은 아래 참고 |
+| `Assets/StreamingAssets/keywordwall.json` | 키워드 월 `walls[]` 의 디스플레이 번호가 세트와 겹치지 않는지 (`roles` 로 역할별 항목이 나뉘어 있다) |
 | `Assets/StreamingAssets/floor_<N>/` | 마커 ID 폴더와 영상, `keywords.txt` |
 
 `aruco.json` 과 `keywordwall.json` 은 없으면 첫 실행 때 기본값으로 만들어진다.
+
+### PC 별 `Setting.json`
+
+| PC | `floor` | `role` | `statsHost` | 비고 |
+|---|---|---|---|---|
+| 1층 | 1 | `all` | (안 씀) | 카메라 1 + 월 2 를 한 PC 가 맡는다 |
+| 2층 ArUco PC | 2 | `aruco` | (안 씀) | 카메라 2 + 프로젝터 2. `statsPort`(기본 5100)를 방화벽에서 열어 둔다 |
+| 2층 월 PC | 2 | `wall` | 2층 ArUco PC 의 IP | 프로젝터 2. 랜선으로 ArUco PC 와 연결 |
+| 3층 | 3 | 위와 같음 | | |
+
+두 PC 는 서로 없어도 각자 돈다. 월 PC 의 시작 로그에 `[Stats] ArUco PC 연결됨` 이 찍히면 링크가 된 것이고,
+`[TCP] 연결/수신 오류` 가 반복되면 IP · 방화벽 · 랜선을 확인한다.
+
+`aruco.json` 과 `Setting.json` 은 실제로는 `persistentDataPath` 에서 읽고 쓴다
+(Windows: `%USERPROFILE%\AppData\LocalLow\DefaultCompany\StoryRest\`).
+`StreamingAssets` 의 파일은 거기에 아직 파일이 없을 때 한 번 복사되는 원본이라,
+한 번 실행한 뒤에는 `StreamingAssets` 쪽을 고쳐도 반영되지 않는다 — `persistentDataPath` 의 파일을 고치거나 지운다.
+정확한 경로는 시작 로그의 `설정 파일:` / `층 설정:` 줄에 있다.
 
 콘텐츠 영상(`floor_<N>/<마커ID>/`)은 저장소에 넣지 않는다. 현장에서 직접 복사한다.
 

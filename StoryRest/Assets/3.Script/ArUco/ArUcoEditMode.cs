@@ -37,12 +37,16 @@ namespace StoryRest.ArUco
         [SerializeField] KeyCode toggleKey = KeyCode.F1;
         [SerializeField] KeyCode stageKey = KeyCode.F2;
         [SerializeField] KeyCode nextMarkerKey = KeyCode.Tab;
+        // 한 마커가 영상과 이미지를 함께 띄우므로 그 안에서 장을 고르는 키가 따로 필요하다.
+        [SerializeField] KeyCode prevItemKey = KeyCode.Comma;
+        [SerializeField] KeyCode nextItemKey = KeyCode.Period;
         [SerializeField] KeyCode resetMarkerKey = KeyCode.Backspace;
         [SerializeField] KeyCode reloadContentKey = KeyCode.F5;
         [SerializeField] KeyCode outlineKey = KeyCode.D;
         [SerializeField] KeyCode cameraPreviewKey = KeyCode.C;
         [SerializeField] KeyCode contentKey = KeyCode.V;
         [SerializeField] KeyCode perspectiveKey = KeyCode.P;
+        [SerializeField] KeyCode hudKey = KeyCode.H;
         [SerializeField] KeyCode actionKey = KeyCode.Space;
         // GameManager 가 S 를 쓰고 SettingsPanelUI 가 Esc 를 쓰므로 겹치지 않게 Enter 로 둔다.
         [SerializeField] KeyCode saveKey = KeyCode.Return;
@@ -74,6 +78,10 @@ namespace StoryRest.ArUco
         Stage _stage = Stage.Placement;
         int _selectedMarkerId = -1;
 
+        // 선택한 마커 폴더 안에서 몇 번째 파일을 조정 중인지. -1 이면 마커 전체를 움직인다.
+        // 콘텐츠가 한 장뿐인 마커에서는 굳이 들어갈 일이 없다(마커 전체 = 그 한 장).
+        int _selectedItemIndex = -1;
+
         CalibrationPhase _phase = CalibrationPhase.Idle;
         int _manualIndex;
         int _autoFrames;
@@ -85,6 +93,12 @@ namespace StoryRest.ArUco
 
         bool _dirty;
         float _dirtySince;
+
+        // 안내판 자리. 0 = 단계 기본(배치는 좌상단, 보정은 가운데), 1~4 = 네 귀퉁이, 5 = 한 줄로 접기.
+        // 안내판이 맞추려는 마커를 가릴 때 H 로 옮긴다. 세션 동안만 기억한다.
+        int _hudSlot;
+        const int HudSlotCount = 6;
+        const int HudSlotCompact = 5;
 
         readonly Dictionary<KeyCode, float> _holdTimes = new Dictionary<KeyCode, float>();
         readonly StringBuilder _builder = new StringBuilder(1024);
@@ -172,7 +186,9 @@ namespace StoryRest.ArUco
             foreach (var s in _app.Sets)
             {
                 s.SuppressContent = false;
+                s.SuppressViewCounting = active;   // 설치자가 마커를 만지는 것은 관람이 아니다
                 s.HighlightMarkerId = -1;
+                s.HighlightItemIndex = -1;
                 s.View.ShowHud(null);
                 s.View.BeginOverlay();
                 s.View.EndOverlay();
@@ -220,6 +236,7 @@ namespace StoryRest.ArUco
                 {
                     previous.SuppressContent = false;
                     previous.HighlightMarkerId = -1;
+                    previous.HighlightItemIndex = -1;
                     previous.View.ShowHud(null);
                     previous.View.BeginOverlay();
                     previous.View.EndOverlay();
@@ -227,6 +244,7 @@ namespace StoryRest.ArUco
 
                 _setIndex = i;
                 _selectedMarkerId = -1;
+                _selectedItemIndex = -1;
                 _phase = CalibrationPhase.Idle;
                 _showContent = _stage == Stage.Placement;
             }
@@ -261,6 +279,7 @@ namespace StoryRest.ArUco
             }
 
             if (Input.GetKeyDown(contentKey)) _showContent = !_showContent;
+            if (Input.GetKeyDown(hudKey)) _hudSlot = (_hudSlot + 1) % HudSlotCount;
 
             // 두 단계 모두 여기서 정한다. 보정 중에도 콘텐츠를 띄워 두고
             // 조준점과 실제 투사 위치가 함께 맞는지 볼 수 있어야 한다.
@@ -282,7 +301,14 @@ namespace StoryRest.ArUco
         {
             if (Input.GetKeyDown(nextMarkerKey)) SelectNextMarker(set, IsShiftHeld() ? -1 : 1);
 
+            if (Input.GetKeyDown(nextItemKey)) SelectNextItem(1);
+            if (Input.GetKeyDown(prevItemKey)) SelectNextItem(-1);
+
+            // 폴더에서 파일이 빠졌을 수 있다(F5). 범위를 넘은 선택은 마커 전체로 되돌린다.
+            if (_selectedItemIndex >= SelectedEntryCount) _selectedItemIndex = -1;
+
             set.HighlightMarkerId = _selectedMarkerId;
+            set.HighlightItemIndex = _selectedItemIndex;
 
             if (Input.GetKeyDown(perspectiveKey))
             {
@@ -306,9 +332,9 @@ namespace StoryRest.ArUco
             float dr = (KeyStep(KeyCode.RightBracket) - KeyStep(KeyCode.LeftBracket)) * config.adjustRotationStep * fine;
             float dPage = (KeyStep(KeyCode.PageUp) - KeyStep(KeyCode.PageDown)) * config.adjustScaleStep * fine;
 
-            // Ctrl 을 누르면 같은 키가 세트 전체에 걸린다.
-            // 마커를 고르지 않아도 되므로, 콘텐츠를 채우기 전에 공통 배치부터 잡을 수 있다.
-            if (IsCtrlHeld())
+            // 맨키는 세트 전체에 걸린다. 현장에서 가장 먼저, 가장 많이 하는 일이 "전체를 책자 위로 밀기" 라
+            // 아무것도 고르지 않은 상태의 방향키가 그 일을 한다. 마커 하나만 손볼 때 Ctrl 을 더한다.
+            if (!IsCtrlHeld())
             {
                 if (dx == 0f && dy == 0f && ds == 0f && dPage == 0f) return;
 
@@ -320,30 +346,75 @@ namespace StoryRest.ArUco
                 return;
             }
 
-            // PageUp/PageDown 은 Ctrl 없이도 세트 배율을 바꾼다(기존 조작).
-            if (dPage != 0f)
-            {
-                set.Config.globalScale = Mathf.Max(0.05f, set.Config.globalScale + dPage);
-                MarkDirty();
-            }
-
+            // Ctrl 병행 — 선택한 마커(또는 그 안의 파일 한 장)만.
             if (_selectedMarkerId < 0) return;
             if (dx == 0f && dy == 0f && ds == 0f && dr == 0f) return;
 
             var marker = set.Config.GetOrCreate(_selectedMarkerId);
 
-            marker.offsetX += dx;
-            marker.offsetY += dy;
-            marker.scale = Mathf.Max(0.05f, marker.scale + ds);
-            marker.rotationOffset = Mathf.Repeat(marker.rotationOffset + dr + 180f, 360f) - 180f;
+            // 파일 한 장을 고른 상태면 그 장만 움직인다. 마커 값은 그대로 두어
+            // 나중에 "이 마커 전체를 조금 더 위로" 가 여전히 가능하다.
+            var item = SelectedItem(marker);
+
+            if (item != null)
+            {
+                item.offsetX += dx;
+                item.offsetY += dy;
+                item.scale = Mathf.Max(0.05f, item.scale + ds);
+                item.rotationOffset = Mathf.Repeat(item.rotationOffset + dr + 180f, 360f) - 180f;
+            }
+            else
+            {
+                marker.offsetX += dx;
+                marker.offsetY += dy;
+                marker.scale = Mathf.Max(0.05f, marker.scale + ds);
+                marker.rotationOffset = Mathf.Repeat(marker.rotationOffset + dr + 180f, 360f) - 180f;
+            }
 
             MarkDirty();
         }
 
-        /// <summary>Backspace 는 선택한 마커를, Ctrl+Backspace 는 세트 공통 배치를 되돌린다.</summary>
+        /// <summary>선택한 마커 폴더 안의 콘텐츠들. 마커를 고르지 않았으면 빈 목록이다.</summary>
+        List<ContentEntry> SelectedEntries
+            => _selectedMarkerId >= 0 && _app.Content != null
+                ? _app.Content.GetEntries(_selectedMarkerId)
+                : null;
+
+        int SelectedEntryCount => SelectedEntries?.Count ?? 0;
+
+        /// <summary>지금 조정 중인 파일의 배치값. 마커 전체를 고른 상태면 null 이다.</summary>
+        ContentPlacement SelectedItem(MarkerConfig marker)
+        {
+            var entries = SelectedEntries;
+            if (entries == null || _selectedItemIndex < 0 || _selectedItemIndex >= entries.Count) return null;
+
+            return marker.GetOrCreateItem(entries[_selectedItemIndex].fileName, _selectedItemIndex);
+        }
+
+        /// <summary>
+        /// 마커 전체 → 첫 장 → 둘째 장 → … → 다시 마커 전체 순으로 돈다.
+        /// 콘텐츠가 한 장뿐이면 마커 전체와 그 장이 사실상 같으므로 오가도 헷갈릴 것이 없다.
+        /// </summary>
+        void SelectNextItem(int direction)
+        {
+            int count = SelectedEntryCount;
+            if (count == 0)
+            {
+                _selectedItemIndex = -1;
+                return;
+            }
+
+            // -1(마커 전체)을 목록의 한 자리로 넣어 순환시킨다.
+            int index = _selectedItemIndex + 1 + direction;
+            int size = count + 1;
+
+            _selectedItemIndex = ((index % size) + size) % size - 1;
+        }
+
+        /// <summary>Backspace 는 세트 공통 배치를, Ctrl+Backspace 는 선택한 마커를 되돌린다(이동 키와 같은 규칙).</summary>
         void ResetPlacement(ArUcoSet set)
         {
-            if (IsCtrlHeld())
+            if (!IsCtrlHeld())
             {
                 set.Config.ResetGlobalPlacement();
                 MarkDirty();
@@ -352,7 +423,13 @@ namespace StoryRest.ArUco
 
             if (_selectedMarkerId < 0) return;
 
-            set.Config.GetOrCreate(_selectedMarkerId).ResetPlacement();
+            var marker = set.Config.GetOrCreate(_selectedMarkerId);
+            var item = SelectedItem(marker);
+
+            // 파일 한 장을 고른 상태면 그 장만 처음 자리로 되돌린다(둘째 장부터는 오른쪽 기본 자리).
+            if (item != null) item.ResetPlacement(_selectedItemIndex);
+            else marker.ResetPlacement();
+
             MarkDirty();
         }
 
@@ -367,6 +444,9 @@ namespace StoryRest.ArUco
                 : ((index + direction) % visible.Count + visible.Count) % visible.Count;
 
             _selectedMarkerId = visible[index];
+
+            // 다른 마커로 옮기면 장 선택은 의미가 없다. 마커 전체부터 다시 시작한다.
+            _selectedItemIndex = -1;
         }
 
         // ── 코너 보정 ────────────────────────────────────────────────────────────
@@ -376,6 +456,7 @@ namespace StoryRest.ArUco
             // 이 단계에서는 마커를 고르지 않는다. 콘텐츠를 띄워 둔 채로 넘어오면
             // 배치에서 켜 둔 하이라이트가 그대로 남는다.
             set.HighlightMarkerId = -1;
+            set.HighlightItemIndex = -1;
 
             var calibration = set.Config.calibration;
             var projectorPoints = calibration.projectorPoints;
@@ -732,7 +813,19 @@ namespace StoryRest.ArUco
         void UpdateHud(ArUcoSet set)
         {
             _builder.Clear();
-            _builder.AppendLine("<color=#ffd633><b>편집모드</b></color>   <color=#888888>F1 나가기 · F2 단계</color>");
+            _builder.Append("<color=#ffd633><b>편집모드</b></color>   <color=#888888>F1 나가기 · F2 단계 · " +
+                            $"{hudKey} 안내판 {(_hudSlot == HudSlotCompact ? "펼치기" : "옮기기")}</color>");
+
+            // 접은 상태 — 마커를 가리지 않게 첫 줄만 남긴다. 저장 대기 표시는 놓치면 안 되므로 같이 둔다.
+            if (_hudSlot == HudSlotCompact)
+            {
+                if (_dirty) _builder.Append("   <color=#ffd633>* 저장 대기</color>");
+                set.View.ShowHud(_builder.ToString(), HudAnchorFor(_hudSlot));
+                HideOtherHuds();
+                return;
+            }
+
+            _builder.AppendLine();
 
             AppendSetLine();
             _builder.AppendLine();
@@ -749,6 +842,8 @@ namespace StoryRest.ArUco
             if (set.CameraPreviewEnabled)
                 _builder.AppendLine("<color=#ffd633>카메라영상이 켜져 있습니다 — 편집모드를 나가도 계속 투사됩니다.</color>");
 
+            AppendCaptureLine(set);
+
             var visible = set.VisibleMarkerIds;
             _builder.Append(visible.Count > 0
                 ? $"<color=#88ff88>보이는 마커: {string.Join(", ", visible)}</color>"
@@ -756,14 +851,56 @@ namespace StoryRest.ArUco
 
             if (_dirty) _builder.Append("   <color=#ffd633>* 저장 대기</color>");
 
-            // 코너 보정 중에는 네 귀퉁이 조준점을 가리지 않도록 안내판을 가운데로 옮긴다.
-            set.View.ShowHud(_builder.ToString(), _stage == Stage.Calibration);
+            set.View.ShowHud(_builder.ToString(), HudAnchorFor(_hudSlot));
+            HideOtherHuds();
+        }
 
-            // 다른 세트에는 편집 UI 가 남지 않게 한다.
+        // HUD 는 선택한 세트에만 띄운다. 다른 세트는 전시 상태를 유지한다.
+        void HideOtherHuds()
+        {
             for (int i = 0; i < _app.Sets.Count; i++)
             {
                 if (i != _setIndex) _app.Sets[i].View.ShowHud(null);
             }
+        }
+
+        HudAnchor HudAnchorFor(int slot)
+        {
+            switch (slot)
+            {
+                case 1: return HudAnchor.TopRight;
+                case 2: return HudAnchor.BottomRight;
+                case 3: return HudAnchor.BottomLeft;
+                case 4: return HudAnchor.TopLeft;
+                // 기본과 접기 — 코너 보정 중에는 네 귀퉁이 조준점을 가리지 않도록 가운데로 둔다.
+                default: return _stage == Stage.Calibration ? HudAnchor.Center : HudAnchor.TopLeft;
+            }
+        }
+
+        /// <summary>
+        /// 카메라가 실제로 어떻게 열렸고 몇 fps 로 들어오는지. 캡처는 워커 스레드에서 도므로
+        /// 이 값이 낮아도 화면은 멈추지 않지만, 마커 반응 속도는 그대로 이 값을 따라간다.
+        /// 현장에서 "반응이 굼뜨다" 의 원인이 카메라인지 화면인지 여기서 바로 갈린다.
+        /// </summary>
+        void AppendCaptureLine(ArUcoSet set)
+        {
+            var tracker = set.Tracker;
+            if (tracker == null || !tracker.IsInitialized) return;
+
+            float captureFps = tracker.CaptureFps;
+            string color = captureFps >= 20f ? "#888888" : "#ffd633";
+
+            _builder.AppendLine($"<color={color}>카메라 {tracker.CaptureFormat} — " +
+                                $"실측 {captureFps:0}fps · 검출 {tracker.DetectMs:0.0}ms · " +
+                                $"대기 {tracker.CaptureWaitMs:0.0}ms (워커 스레드)</color>");
+            _builder.AppendLine($"<color=#888888>화면 {1f / Mathf.Max(Time.unscaledDeltaTime, 0.0001f):0}fps</color>");
+
+            // 편집모드 안에서는 세지 않으므로 들어오기 전까지 센 수다.
+            // "기록이 되고 있나" 를 파일을 열지 않고 확인하는 용도다.
+            int views = set.ViewsCountedThisRun;
+            _builder.AppendLine(views < 0
+                ? "<color=#888888>관람 기록 꺼짐 (recordViews)</color>"
+                : $"<color=#888888>이번 실행 관람 {views}회 기록</color>");
         }
 
         void AppendSetLine()
@@ -787,36 +924,82 @@ namespace StoryRest.ArUco
 
         void AppendPlacement(ArUcoSet set)
         {
-            _builder.AppendLine("<b>마커 배치</b>");
+            _builder.AppendLine("<b>마커 배치</b>   <color=#888888>방향키는 책자 기준 (책자를 프로젝터 정면으로 놓고)</color>");
+
+            _builder.AppendLine($"<color=#ffd633>세트 공통</color>  " +
+                                $"크기 <b>{set.Config.globalScale:0.00}</b>  " +
+                                $"좌우 <b>{set.Config.globalOffsetX:+0.00;-0.00; 0.00}</b>  " +
+                                $"상하 <b>{set.Config.globalOffsetY:+0.00;-0.00; 0.00}</b>" +
+                                $"   <color=#888888>← → ↑ ↓ · + - · {resetMarkerKey} 초기화</color>");
+            _builder.AppendLine();
 
             if (_selectedMarkerId < 0)
             {
-                _builder.AppendLine("카메라에 마커를 비춘 뒤 Tab 으로 고르세요.");
+                _builder.AppendLine("마커 하나만 손보려면 카메라에 비춘 뒤 Tab 으로 고르고 <b>Ctrl</b> 을 누른 채 조정하세요.");
             }
             else
             {
                 var marker = set.Config.GetOrCreate(_selectedMarkerId);
                 bool onScreen = IndexOf(set.VisibleMarkerIds, _selectedMarkerId) >= 0;
+                string folder = _app.Content?.GetFolderName(_selectedMarkerId);
 
                 _builder.AppendLine($"선택  <b>{_selectedMarkerId}번</b>" +
+                                    $"{(string.IsNullOrEmpty(folder) ? "" : $"  <color=#888888>{folder}</color>")}" +
                                     $"{(onScreen ? "" : "  <color=#ff8888>(화면에 없음)</color>")}   <color=#888888>Tab 다음</color>");
-                _builder.AppendLine($"크기  <b>{marker.scale:0.00}</b>   <color=#888888>+ / -</color>");
-                _builder.AppendLine($"좌우  <b>{marker.offsetX:+0.00;-0.00; 0.00}</b>   <color=#888888>← / →</color>");
-                _builder.AppendLine($"상하  <b>{marker.offsetY:+0.00;-0.00; 0.00}</b>   <color=#888888>↑ / ↓</color>");
-                _builder.AppendLine($"회전  <b>{marker.rotationOffset:+0.0;-0.0; 0.0}°</b>   <color=#888888>[ / ]</color>");
+
+                AppendItemLine();
+
+                // 지금 키가 걸리는 대상의 값만 보여준다. 마커 값과 파일 값을 함께 늘어놓으면
+                // 어느 쪽이 움직이는지 헷갈린다.
+                var item = SelectedItem(marker);
+
+                float scale = item != null ? item.scale : marker.scale;
+                float offsetX = item != null ? item.offsetX : marker.offsetX;
+                float offsetY = item != null ? item.offsetY : marker.offsetY;
+                float rotation = item != null ? item.rotationOffset : marker.rotationOffset;
+
+                _builder.AppendLine($"크기  <b>{scale:0.00}</b>   <color=#888888>Ctrl + / -</color>");
+                _builder.AppendLine($"좌우  <b>{offsetX:+0.00;-0.00; 0.00}</b>   <color=#888888>Ctrl ← / →</color>");
+                _builder.AppendLine($"상하  <b>{offsetY:+0.00;-0.00; 0.00}</b>   <color=#888888>Ctrl ↑ / ↓</color>");
+                _builder.AppendLine($"회전  <b>{rotation:+0.0;-0.0; 0.0}°</b>   <color=#888888>Ctrl [ / ]</color>");
+                _builder.AppendLine($"<color=#888888>Ctrl 를 누른 동안만 이 마커에 걸립니다 · Ctrl+{resetMarkerKey} 초기화</color>");
             }
 
             _builder.AppendLine();
-            _builder.AppendLine($"<color=#ffd633>세트 공통</color>  " +
-                                $"크기 <b>{set.Config.globalScale:0.00}</b>  " +
-                                $"좌우 <b>{set.Config.globalOffsetX:+0.00;-0.00; 0.00}</b>  " +
-                                $"상하 <b>{set.Config.globalOffsetY:+0.00;-0.00; 0.00}</b>");
-            _builder.AppendLine($"<color=#888888>Ctrl 병행 — 모든 마커가 함께 움직입니다 " +
-                                $"(Ctrl+{resetMarkerKey} 초기화 · PageUp/PageDown 도 크기)</color>");
-
-            _builder.AppendLine();
             _builder.AppendLine($"원근  <b>{(_app.Config.perspectiveMapping ? "켜짐" : "꺼짐")}</b>   <color=#888888>{perspectiveKey}</color>");
-            _builder.AppendLine($"<color=#888888>Shift 병행 미세조정 · {resetMarkerKey} 이 마커 초기화 · {saveKey} 즉시저장</color>");
+            _builder.AppendLine($"<color=#888888>Shift 병행 미세조정 · PageUp/PageDown 세트 크기 · {saveKey} 즉시저장</color>");
+        }
+
+        /// <summary>
+        /// 이 마커 폴더에 무엇이 들어 있고 그중 어느 장을 만지는 중인지 보여준다.
+        /// 파일 이름이 곧 보정값의 키라(→ ContentPlacement.file) 이름을 그대로 띄운다.
+        /// </summary>
+        void AppendItemLine()
+        {
+            var entries = SelectedEntries;
+
+            if (entries == null || entries.Count == 0)
+            {
+                _builder.AppendLine("<color=#ff8888>이 폴더에 콘텐츠가 없습니다.</color>");
+                return;
+            }
+
+            _builder.Append("콘텐츠  ");
+            _builder.Append(_selectedItemIndex < 0
+                ? "<color=#ffd633><b>[마커 전체]</b></color> "
+                : "<color=#888888>마커 전체</color> ");
+
+            for (int i = 0; i < entries.Count; i++)
+            {
+                string name = entries[i].fileName;
+                string kind = entries[i].IsVideo ? "▶" : "▣";
+
+                _builder.Append(i == _selectedItemIndex
+                    ? $"<color=#ffd633><b>[{kind} {name}]</b></color> "
+                    : $"<color=#888888>{kind} {name}</color> ");
+            }
+
+            _builder.AppendLine($"  <color=#888888>{prevItemKey} / {nextItemKey} 로 고름</color>");
         }
 
         void AppendCalibration(ArUcoSet set)

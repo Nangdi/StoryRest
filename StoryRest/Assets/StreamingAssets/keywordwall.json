@@ -1,27 +1,11 @@
 {
     "enabled": true,
     "walls": [
-        {
-            "displayIndex": 1,
-            "floors": [
-                1
-            ]
-        },
-        {
-            "displayIndex": 2,
-            "floors": [
-                1,
-                2,
-                3
-            ]
-        },
-        {
-            "displayIndex": 3,
-            "floors": [
-                2,
-                3
-            ]
-        }
+        { "displayIndex": 1, "floors": [1],       "roles": ["all"] },
+        { "displayIndex": 2, "floors": [1, 2, 3], "roles": ["all"] },
+        { "displayIndex": 3, "floors": [2, 3],    "roles": ["all"] },
+        { "displayIndex": 0, "floors": [2, 3],    "roles": ["wall"] },
+        { "displayIndex": 1, "floors": [2, 3],    "roles": ["wall"] }
     ],
     "maxOnScreen": 16,
     "minFontSize": 44.0,

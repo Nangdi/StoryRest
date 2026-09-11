@@ -15,6 +15,9 @@ namespace StoryRest.ArUco
     /// 배경은 항상 검은색이다. 프로젝터는 실제 책자 위에 빛을 쏘므로
     /// 카메라 영상을 투사하면 실물과 겹쳐 보인다(→ docs/ARCHITECTURE.md §3).
     /// </summary>
+    /// <summary>안내판(HUD)을 화면 어디에 둘지. 설치자가 보려는 자리를 가리지 않게 옮겨 다닌다.</summary>
+    public enum HudAnchor { TopLeft, TopRight, BottomRight, BottomLeft, Center }
+
     [DisallowMultipleComponent]
     public class ArUcoProjectionView : MonoBehaviour
     {
@@ -153,12 +156,12 @@ namespace StoryRest.ArUco
         }
 
         /// <summary>
-        /// 마커 평면 위에 콘텐츠 한 장을 눕혀 그린다.
+        /// 마커 평면 위에 콘텐츠 한 장을 눕혀 그린다. 배치값은 세트 공통 → 마커 → 파일을 이미 합친 것이다.
         /// 평면이 서 있어(카메라와 거의 평행) 좌표가 발산하면 false 를 돌리고 아무것도 그리지 않는다.
         /// </summary>
-        public bool Draw(ArUcoHomography markerPlane, MarkerConfig marker, ArUcoDrawStyle style)
+        public bool Draw(ArUcoHomography markerPlane, ArUcoPlacement placement, ArUcoDrawStyle style)
         {
-            if (!BuildGrid(markerPlane, marker, style, 0f)) return false;
+            if (!BuildGrid(markerPlane, placement, style, 0f)) return false;
 
             var view = GetView(_used);
             view.SetTexture(style.texture);
@@ -172,9 +175,9 @@ namespace StoryRest.ArUco
         }
 
         /// <summary>편집 중인 마커에 조금 더 큰 판을 깔아 어느 것을 조정 중인지 보이게 한다.</summary>
-        public void DrawHighlight(ArUcoHomography markerPlane, MarkerConfig marker, ArUcoDrawStyle style)
+        public void DrawHighlight(ArUcoHomography markerPlane, ArUcoPlacement placement, ArUcoDrawStyle style)
         {
-            if (!BuildGrid(markerPlane, marker, style, 0.06f)) return;
+            if (!BuildGrid(markerPlane, placement, style, 0.06f)) return;
 
             _highlight.SetNodes(_gridDivisions, _gridDivisions, _nodes);
             _highlight.enabled = true;
@@ -190,9 +193,9 @@ namespace StoryRest.ArUco
         /// 마커 자리에 안내 문구를 띄운다. 콘텐츠가 뜰 자리를 그대로 덮되 워프하지 않는다 —
         /// 글자는 읽히는 것이 목적이라 원근을 주면 오히려 알아보기 어렵다.
         /// </summary>
-        public bool DrawLabel(ArUcoHomography markerPlane, MarkerConfig marker, ArUcoDrawStyle style, string text)
+        public bool DrawLabel(ArUcoHomography markerPlane, ArUcoPlacement placement, ArUcoDrawStyle style, string text)
         {
-            if (!BuildGrid(markerPlane, marker, style, 0f)) return false;
+            if (!BuildGrid(markerPlane, placement, style, 0f)) return false;
 
             // 워프된 사각형을 감싸는 박스를 잡는다. 마커가 기울어도 글자는 화면과 나란히 남는다.
             Vector2 min = _nodes[0];
@@ -256,12 +259,13 @@ namespace StoryRest.ArUco
         /// <summary>
         /// 편집모드 안내판. null 을 넘기면 숨긴다.
         /// 전시 중에는 어떤 편집 UI 도 보이지 않아야 하므로 필요할 때 처음 만든다.
+        /// 높이는 글에 맞춰 늘고 줄어든다 — 고정 크기면 짧은 안내에도 화면 한 구석을 통째로 가린다.
         /// </summary>
-        /// <param name="center">
-        /// 화면 중앙에 놓는다. 코너 보정 중에는 네 귀퉁이의 조준점을 가리면 안 되므로
-        /// 안내판을 비어 있는 가운데로 옮긴다.
+        /// <param name="anchor">
+        /// 놓을 자리. 코너 보정은 네 귀퉁이의 조준점을 가리면 안 되므로 가운데에 두고,
+        /// 배치 중에는 설치자가 H 로 옮겨 가며 맞추려는 마커를 비켜 준다.
         /// </param>
-        public void ShowHud(string text, bool center = false)
+        public void ShowHud(string text, HudAnchor anchor = HudAnchor.TopLeft)
         {
             if (string.IsNullOrEmpty(text))
             {
@@ -271,16 +275,21 @@ namespace StoryRest.ArUco
 
             if (_hudPanel == null) BuildHud();
 
-            if (center)
+            const float margin = 24f;
+            Vector2 a;
+            Vector2 pos;
+
+            switch (anchor)
             {
-                _hudPanel.anchorMin = _hudPanel.anchorMax = _hudPanel.pivot = new Vector2(0.5f, 0.5f);
-                _hudPanel.anchoredPosition = Vector2.zero;
+                case HudAnchor.TopRight:    a = new Vector2(1f, 1f);     pos = new Vector2(-margin, -margin); break;
+                case HudAnchor.BottomRight: a = new Vector2(1f, 0f);     pos = new Vector2(-margin, margin);  break;
+                case HudAnchor.BottomLeft:  a = new Vector2(0f, 0f);     pos = new Vector2(margin, margin);   break;
+                case HudAnchor.Center:      a = new Vector2(0.5f, 0.5f); pos = Vector2.zero;                  break;
+                default:                    a = new Vector2(0f, 1f);     pos = new Vector2(margin, -margin);  break;
             }
-            else
-            {
-                _hudPanel.anchorMin = _hudPanel.anchorMax = _hudPanel.pivot = new Vector2(0f, 1f);
-                _hudPanel.anchoredPosition = new Vector2(24f, -24f);
-            }
+
+            _hudPanel.anchorMin = _hudPanel.anchorMax = _hudPanel.pivot = a;
+            _hudPanel.anchoredPosition = pos;
 
             _hudPanel.gameObject.SetActive(true);
             _hudText.text = text;
@@ -293,12 +302,24 @@ namespace StoryRest.ArUco
 
             _hudPanel = panelGo.GetComponent<RectTransform>();
             _hudPanel.anchorMin = _hudPanel.anchorMax = _hudPanel.pivot = new Vector2(0f, 1f);
-            _hudPanel.sizeDelta = new Vector2(720f, 520f);
+            _hudPanel.sizeDelta = new Vector2(720f, 0f);
             _hudPanel.anchoredPosition = new Vector2(24f, -24f);
 
             _hudBackground = panelGo.AddComponent<Image>();
             _hudBackground.color = new Color(0f, 0f, 0f, 0.78f);
             _hudBackground.raycastTarget = false;
+
+            // 폭은 720 고정, 높이는 글의 줄 수를 따라간다.
+            var layout = panelGo.AddComponent<VerticalLayoutGroup>();
+            layout.padding = new RectOffset(28, 28, 24, 24);
+            layout.childControlWidth = true;
+            layout.childControlHeight = true;
+            layout.childForceExpandWidth = true;
+            layout.childForceExpandHeight = false;
+
+            var fitter = panelGo.AddComponent<ContentSizeFitter>();
+            fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
             var textGo = new GameObject("Text", typeof(RectTransform));
             textGo.transform.SetParent(_hudPanel, false);
@@ -310,12 +331,6 @@ namespace StoryRest.ArUco
             _hudText.alignment = TextAlignmentOptions.TopLeft;
             _hudText.fontSize = 22f;
             _hudText.lineSpacing = 8f;
-
-            var textRect = _hudText.rectTransform;
-            textRect.anchorMin = Vector2.zero;
-            textRect.anchorMax = Vector2.one;
-            textRect.offsetMin = new Vector2(28f, 24f);
-            textRect.offsetMax = new Vector2(-28f, -24f);
         }
 
         public void BeginOverlay() => _overlayUsed = 0;
@@ -370,18 +385,18 @@ namespace StoryRest.ArUco
         /// 콘텐츠 사각형을 격자로 나눠 각 꼭짓점을 마커 평면 위로 옮긴 뒤,
         /// 카메라 픽셀 → 프로젝터 좌표 → 캔버스 로컬 좌표로 바꿔 _nodes 에 담는다.
         /// </summary>
-        bool BuildGrid(ArUcoHomography plane, MarkerConfig marker, ArUcoDrawStyle style, float margin)
+        bool BuildGrid(ArUcoHomography plane, ArUcoPlacement placement, ArUcoDrawStyle style, float margin)
         {
             if (!plane.IsValid) return false;
 
             // 마커 한 변을 1 로 보는 상대 크기라 카메라 거리가 바뀌어도 값이 유지된다.
-            float halfWidth = 0.5f * style.globalScale * marker.scale + margin;
+            float halfWidth = 0.5f * style.globalScale * placement.scale + margin;
             float halfHeight = halfWidth * style.aspect + margin;
 
             // 원근이 없으면 사각형 한 장으로도 정확하다. 쪼갤 이유가 없다.
             _gridDivisions = style.perspective ? Mathf.Clamp(style.subdivisions, 1, 32) : 1;
 
-            float rad = marker.rotationOffset * Mathf.Deg2Rad;
+            float rad = placement.rotationOffset * Mathf.Deg2Rad;
             float cos = Mathf.Cos(rad);
             float sin = Mathf.Sin(rad);
 
@@ -402,8 +417,9 @@ namespace StoryRest.ArUco
                     //
                     // 세트 공통 위치는 개별 회전 뒤에 더한다. 마커별 offset 과 같은 좌표계에 있어야
                     // "전체를 밀어 둔 자리에서 이 마커만 조금 더" 가 예상대로 동작한다.
-                    float rx = px * cos - py * sin + marker.offsetX + style.globalOffset.x;
-                    float ry = px * sin + py * cos + marker.offsetY + style.globalOffset.y;
+                    // 파일별 offset 도 같은 이유로 마커 offset 에 그냥 더해 둔 상태로 들어온다.
+                    float rx = px * cos - py * sin + placement.offsetX + style.globalOffset.x;
+                    float ry = px * sin + py * cos + placement.offsetY + style.globalOffset.y;
 
                     // 마커 중심이 (0.5, 0.5), 한 변이 1. v 는 아래로 증가하므로 y 부호를 뒤집는다.
                     if (!plane.TryMap(new Vector2(0.5f + rx, 0.5f - ry), out Vector2 cameraPixel))

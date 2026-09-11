@@ -23,6 +23,12 @@ public class SettingsPanelUI : MonoBehaviour
     // 데이터 -> UI 반영 중에는 onValueChanged 콜백이 저장을 유발하지 않도록 막는다.
     private bool _syncing;
 
+    /// <summary>다른 스크립트가 줄을 덧붙일 수 있게 패널 루트를 연다(ArUcoSettingsPanel).</summary>
+    public GameObject PanelRoot => panelRoot;
+
+    /// <summary>창이 열리고 닫힐 때. 덧붙인 줄이 열 때 값을 다시 읽고 닫을 때 저장하는 데 쓴다.</summary>
+    public event System.Action<bool> VisibilityChanged;
+
     private void Start()
     {
         if (alwaysOnTop == null)
@@ -56,6 +62,8 @@ public class SettingsPanelUI : MonoBehaviour
         {
             RestoreCursor();         // 설정값대로 복원
         }
+
+        VisibilityChanged?.Invoke(show);
     }
 
     // 현재 showMouseCursor 설정값대로 커서 표시/숨김을 되돌린다.

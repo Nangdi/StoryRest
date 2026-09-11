@@ -7,6 +7,10 @@ namespace StoryRest.ArUco
     /// <summary>
     /// aruco.json 을 읽고 쓴다.
     ///
+    /// 실제로 읽고 쓰는 파일은 persistentDataPath 에 있다. StreamingAssets 는 빌드마다 통째로 새로 깔리므로
+    /// 거기에 두면 빌드를 다시 넣을 때마다 현장에서 맞춘 배치·보정값이 날아간다.
+    /// StreamingAssets/aruco.json 은 처음 실행할 때 한 번 복사해 오는 기본값 원본일 뿐이다.
+    ///
     /// 설치 현장에서 맞춘 배치값이 여기에만 남으므로, 쓰다가 손상되면 설치를 처음부터 다시 해야 한다.
     /// 그래서 저장은 임시 파일에 쓴 뒤 바꿔치기하고, 직전 내용을 .bak 으로 남긴다.
     /// (전시장 PC 는 예고 없이 꺼진다 — 쓰기 도중 전원이 끊겨도 원본이 반쯤 지워지지 않아야 한다.)
@@ -15,13 +19,17 @@ namespace StoryRest.ArUco
     {
         public const string FileName = "aruco.json";
 
-        public static string Path => System.IO.Path.Combine(Application.streamingAssetsPath, FileName);
+        /// <summary>실제로 읽고 쓰는 파일. 빌드를 새로 넣어도 남는다.</summary>
+        public static string Path => System.IO.Path.Combine(Application.persistentDataPath, FileName);
+
+        /// <summary>빌드에 실려 오는 기본값 원본. Path 에 파일이 없을 때 한 번 복사해 온다.</summary>
+        public static string DefaultPath => System.IO.Path.Combine(Application.streamingAssetsPath, FileName);
 
         static string TempPath => Path + ".tmp";
         static string BackupPath => Path + ".bak";
 
         /// <summary>
-        /// 파일을 읽는다. 없으면 기본값으로 새로 만든다.
+        /// 파일을 읽는다. 없으면 StreamingAssets 의 기본값 원본을 복사해 오고, 그것도 없으면 기본값으로 새로 만든다.
         /// 내용이 깨져 있으면 기본값으로 진행하되, 원본은 .broken 으로 남겨 복구할 수 있게 한다.
         /// </summary>
         public static ArUcoConfig Load()
@@ -29,7 +37,7 @@ namespace StoryRest.ArUco
             var config = new ArUcoConfig();
             string path = Path;
 
-            if (!File.Exists(path))
+            if (!File.Exists(path) && !TrySeedFromDefault(path))
             {
                 Debug.LogWarning($"[ArUco] 설정 파일이 없어 기본값으로 새로 만듭니다: {path}");
                 Save(config);
@@ -85,6 +93,29 @@ namespace StoryRest.ArUco
             {
                 Debug.LogError($"[ArUco] 설정 파일을 쓰지 못했습니다: {path}\n{e.Message}");
                 TryDeleteTemp();
+                return false;
+            }
+        }
+
+        // 첫 실행 — 빌드에 실려 온 기본값을 persistentDataPath 로 복사한다. 이후로는 복사본만 읽고 쓴다.
+        static bool TrySeedFromDefault(string path)
+        {
+            string source = DefaultPath;
+            if (!File.Exists(source)) return false;
+
+            try
+            {
+                string directory = System.IO.Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                    Directory.CreateDirectory(directory);
+
+                File.Copy(source, path);
+                Debug.Log($"[ArUco] 설정 파일이 없어 기본값 원본을 복사했습니다: {source} → {path}");
+                return true;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[ArUco] 기본값 원본을 복사하지 못했습니다: {source}\n{e.Message}");
                 return false;
             }
         }

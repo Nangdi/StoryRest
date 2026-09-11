@@ -1,3 +1,17 @@
 {
-    "floor": 1
+    "help": [
+        "이 파일은 이 PC 의 층과 역할을 정한다. 값을 바꾸면 프로그램을 다시 시작해야 적용된다.",
+        "floor: 1~3. 이 PC 가 설치된 층. StreamingAssets/floor_<N>/ 의 콘텐츠를 쓴다.",
+        "role: all / aruco / wall.",
+        "  all   = PC 1대가 카메라·마커·영상 + 키워드 월을 다 맡는다 (1층). 통신 없음.",
+        "  aruco = 카메라·마커·영상만. 관람 기록을 statsPort 로 월 PC 에 보낸다 (2·3층 ArUco PC).",
+        "  wall  = 키워드 월만. statsHost:statsPort 의 ArUco PC 에 붙어 관람 기록을 받는다 (2·3층 월 PC).",
+        "statsHost: wall 일 때 같은 층 ArUco PC 의 IP. all 은 쓰지 않는다.",
+        "statsPort: aruco 가 여는 포트 = wall 이 붙는 포트. 양쪽 같아야 하고 ArUco PC 방화벽에서 열어 둔다.",
+        "카메라 수는 여기가 아니라 aruco.json 의 sets[].floors 가 정한다. 이 층 번호가 든 세트만 만들어진다."
+    ],
+    "floor": 1,
+    "role": "all",
+    "statsHost": "127.0.0.1",
+    "statsPort": 5100
 }
