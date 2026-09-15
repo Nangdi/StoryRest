@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -42,7 +43,19 @@ namespace StoryRest.Stats
         readonly List<Client> _clients = new List<Client>();
         readonly object _clientsLock = new object();
 
+        // 수락·수신은 백그라운드 스레드라 로그 줄을 큐에 넣고 Update 에서 메인 스레드로 흘린다.
+        readonly ConcurrentQueue<string> _traffic = new ConcurrentQueue<string>();
+
+        /// <summary>
+        /// 주고받은 것 한 줄씩 — "→ 주소 내용" 보냄, "← 주소 내용" 받음, 연결/끊김. 메인 스레드에서 난다.
+        /// sync 응답은 수백 줄이라 한 줄로 접는다. ESC 의 TCP 패널이 구독한다.
+        /// </summary>
+        public event Action<string> Traffic;
+
         public int Port => _port;
+
+        /// <summary>포트를 열어 대기 중인가. 못 열었으면 false — 시작 로그에 원인이 있다.</summary>
+        public bool IsListening => _listener != null;
 
         /// <summary>지금 붙어 있는 클라이언트 수. HUD · 설정창 표시용.</summary>
         public int ClientCount
@@ -50,9 +63,32 @@ namespace StoryRest.Stats
             get { lock (_clientsLock) return _clients.Count; }
         }
 
+        /// <summary>붙어 있는 클라이언트의 주소를 목록에 담는다(디버그 패널용).</summary>
+        public void GetClientNames(List<string> into)
+        {
+            lock (_clientsLock)
+            {
+                for (int i = 0; i < _clients.Count; i++) into.Add(_clients[i].name);
+            }
+        }
+
+        /// <summary>이번 실행에서 실시간으로 내보낸 건수(sync 응답은 세지 않는다).</summary>
+        public int SentThisRun { get; private set; }
+
+        /// <summary>마지막으로 실시간 한 건을 내보낸 시각(Time.unscaledTime). 0 이면 아직 없음.</summary>
+        public float LastSentAt { get; private set; }
+
+        /// <summary>마지막으로 내보낸 줄. "지금 뭐가 나갔나" 를 눈으로 맞춰 보는 용도.</summary>
+        public string LastSentLine { get; private set; } = "";
+
         public void Setup(int port)
         {
             _port = port;
+        }
+
+        void Update()
+        {
+            while (_traffic.TryDequeue(out string line)) Traffic?.Invoke(line);
         }
 
         void Start()
@@ -66,6 +102,7 @@ namespace StoryRest.Stats
             {
                 Debug.LogError($"[Stats] 관람 기록 서버를 {_port} 포트에 열지 못했습니다. 월 PC 가 기록을 받지 못합니다.\n{e.Message}");
                 _listener = null;
+                _traffic.Enqueue($"<color=#ff8888>포트 {_port} 를 열지 못함 — {e.Message}</color>");
                 return;
             }
 
@@ -74,6 +111,7 @@ namespace StoryRest.Stats
 
             ViewLog.Recorded += OnRecorded;
             Debug.Log($"[Stats] 관람 기록 서버 대기 중 — 포트 {_port}");
+            _traffic.Enqueue($"포트 {_port} 대기 시작");
         }
 
         void OnDestroy()
@@ -97,7 +135,12 @@ namespace StoryRest.Stats
         // 메인 스레드 — ViewLog.Append 가 카운터(메인 스레드)에서 불리므로 여기도 메인 스레드다.
         void OnRecorded(ViewRecord record)
         {
-            Broadcast("view " + ViewLog.Format(record));
+            string line = ViewLog.Format(record);
+            LastSentLine = line;
+            LastSentAt = Time.unscaledTime;
+            if (ClientCount > 0) SentThisRun++;
+
+            Broadcast("view " + line);
         }
 
         async Task AcceptLoopAsync(CancellationToken token)
@@ -140,6 +183,7 @@ namespace StoryRest.Stats
 
                 lock (_clientsLock) _clients.Add(client);
                 Debug.Log($"[Stats] 월 PC 연결됨 — {client.name} (연결 {ClientCount}대)");
+                _traffic.Enqueue($"<color=#7fe07f>연결 {client.name}</color>");
 
                 _ = ServeAsync(client, token);
             }
@@ -171,12 +215,14 @@ namespace StoryRest.Stats
                 lock (_clientsLock) _clients.Remove(client);
                 Close(client);
                 Debug.Log($"[Stats] 월 PC 연결 끊김 — {client.name} (연결 {ClientCount}대)");
+                _traffic.Enqueue($"<color=#ffd633>끊김 {client.name}</color>");
             }
         }
 
         // 백그라운드 스레드. 파일 읽기는 정적 함수라 메인 스레드가 필요 없다.
         void Handle(Client client, string line)
         {
+            _traffic.Enqueue($"← {client.name}  {line}");
             if (!line.StartsWith("sync ")) return;
 
             if (!DateTime.TryParseExact(line.Substring(5).Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture,
@@ -199,6 +245,7 @@ namespace StoryRest.Stats
                     for (int i = 0; i < lines.Count; i++) client.writer.WriteLine("view " + lines[i]);
                     client.writer.WriteLine($"synced {day:yyyy-MM-dd} {lines.Count}");
                     client.writer.Flush();
+                    _traffic.Enqueue($"→ {client.name}  view ×{lines.Count} + synced {day:yyyy-MM-dd}");
                 }
                 catch (Exception e)
                 {
@@ -224,6 +271,7 @@ namespace StoryRest.Stats
                     {
                         client.writer.WriteLine(line);
                         client.writer.Flush();
+                        _traffic.Enqueue($"→ {client.name}  {line}");
                     }
                     catch (Exception e)
                     {

@@ -15,7 +15,8 @@ namespace StoryRest.ArUco
     /// 한 번 정하면 끝나는 값은 aruco.json 을 직접 고치는 편이 낫다(잘못 건드리면 화면이 사라진다).
     ///
     /// 값을 바꾸면 살아 있는 세트에 바로 적용하고(→ ArUcoSet.ApplyConfig), 잠시 뒤 aruco.json 에 저장한다.
-    /// 층 번호만 예외다 — 시작할 때만 읽으므로 저장만 하고 재시작을 안내한다.
+    /// 층 · 역할(Setting.json)만 예외다 — 시작할 때만 읽으므로 저장만 하고 재시작을 안내한다.
+    /// 이 둘은 월 PC(wall)에도 있어야 하므로 세트가 없는 역할에서도 판을 붙인다.
     /// </summary>
     public class ArUcoSettingsPanel : MonoBehaviour
     {
@@ -34,8 +35,17 @@ namespace StoryRest.ArUco
         bool _dirty;
         float _dirtySince;
 
-        Text _floorNote;
+        Text _restartNote;
         readonly List<Action> _syncers = new List<Action>();
+
+        // 드롭다운 순서 = AppRole 순서. 설치자가 고르는 글은 Setting.json 의 값과 같은 단어로 시작한다.
+        static readonly string[] RoleOptions =
+        {
+            "all — 카메라 + 키워드 월 (1층)",
+            "aruco — 카메라·영상만 (2·3층)",
+            "wall — 키워드 월만 (2·3층)",
+        };
+        static readonly string[] FloorOptions = { "1층", "2층", "3층" };
 
         public void Attach(SettingsPanelUI ui)
         {
@@ -99,6 +109,12 @@ namespace StoryRest.ArUco
 
         void BuildRows(Transform parent)
         {
+            if (AppSettings.HasArUco(_app.RunningRole)) BuildArUcoRows(parent);
+            BuildSettingRows(parent);
+        }
+
+        void BuildArUcoRows(Transform parent)
+        {
             var config = _app.Config;
 
             Header(parent, "ArUco — 현장 조절값 (바꾸면 바로 적용 · aruco.json 에 저장)");
@@ -129,52 +145,76 @@ namespace StoryRest.ArUco
             ToggleRow(parent, "관람 기록  recordViews",
                 () => config.recordViews, v => config.recordViews = v);
 
-            Header(parent, "층 · 역할 (Setting.json)");
-
-            var settings = _app.Settings;
-            IntRow(parent, "이 PC 의 층  floor", 1, 3,
-                () => settings.floor,
-                v =>
-                {
-                    settings.floor = v;
-                    settings.Save();
-                    UpdateFloorNote();
-                },
-                null, applyToSets: false);
-
-            _floorNote = Note(parent, "");
-            UpdateFloorNote();
-
-            // 역할은 PC 를 바꿔 꽂는 일이라 여기서 바꾸지 않는다 — 파일을 고치고 재시작한다.
-            Note(parent, RoleNote());
-
             Note(parent, $"설정 파일: {ArUcoConfigIO.Path}");
         }
 
-        string RoleNote()
+        // 층과 역할은 시작할 때만 읽는다. 고르면 파일에는 바로 쓰되 다음 실행부터 적용된다.
+        void BuildSettingRows(Transform parent)
         {
             var settings = _app.Settings;
-            string role = AppSettings.RoleName(_app.RunningRole);
+
+            Header(parent, "이 PC 의 층 · 역할 (Setting.json — 바꾸면 재시작해야 적용)");
+
+            DropdownRow(parent, "층  floor", FloorOptions,
+                "StreamingAssets/floor_<N>/ 의 콘텐츠와 그 층 번호가 든 세트·키워드 월을 쓴다.",
+                () => settings.floor - 1,
+                v =>
+                {
+                    settings.floor = v + 1;
+                    SaveSettings();
+                });
+
+            DropdownRow(parent, "역할  role", RoleOptions,
+                "그래픽카드 출력이 3개뿐이라 2·3층은 ArUco PC 와 월 PC 로 나눈다.",
+                () => (int)settings.Role,
+                v =>
+                {
+                    settings.role = AppSettings.RoleName((AppRole)v);
+                    SaveSettings();
+                });
+
+            _restartNote = Note(parent, "");
+            UpdateRestartNote();
+
+            Note(parent, LinkNote());
+            Note(parent, $"설정 파일: {AppSettings.Path}");
+        }
+
+        void SaveSettings()
+        {
+            _app.Settings.Save();
+            UpdateRestartNote();
+        }
+
+        string LinkNote()
+        {
+            var settings = _app.Settings;
 
             switch (_app.RunningRole)
             {
                 case AppRole.ArUco:
-                    return $"역할 {role} — 관람 기록을 포트 {settings.statsPort} 로 월 PC 에 보냄. 바꾸려면 Setting.json 의 role 을 고치고 재시작";
+                    return $"관람 기록을 포트 {settings.statsPort} 로 월 PC 에 보냄 (statsPort 는 Setting.json 에서)";
                 case AppRole.Wall:
-                    return $"역할 {role} — ArUco PC {settings.statsHost}:{settings.statsPort} 에서 관람 기록을 받음";
+                    return $"ArUco PC {settings.statsHost}:{settings.statsPort} 에서 관람 기록을 받음 (statsHost 는 Setting.json 에서)";
                 default:
-                    return $"역할 {role} — 이 PC 가 카메라와 키워드 월을 다 맡음. 바꾸려면 Setting.json 의 role 을 고치고 재시작";
+                    return "이 PC 가 카메라와 키워드 월을 다 맡음 — PC 사이 통신 없음";
             }
         }
 
-        void UpdateFloorNote()
+        void UpdateRestartNote()
         {
-            if (_floorNote == null) return;
+            if (_restartNote == null) return;
 
-            int running = _app.Settings.floor;
-            _floorNote.text = running == _app.RunningFloor
-                ? $"지금 {running}층 구성으로 실행 중"
-                : $"<color=#ffd633>{running}층으로 저장됨 — 재시작해야 적용됩니다 (지금은 {_app.RunningFloor}층)</color>";
+            var settings = _app.Settings;
+            bool floorChanged = settings.floor != _app.RunningFloor;
+            bool roleChanged = settings.Role != _app.RunningRole;
+
+            string running = $"{_app.RunningFloor}층 · {AppSettings.RoleName(_app.RunningRole)}";
+
+            _restartNote.text = !floorChanged && !roleChanged
+                ? $"지금 {running} 구성으로 실행 중"
+                : $"<color=#ffd633>{settings.floor}층 · {AppSettings.RoleName(settings.Role)} 으로 저장됨 — " +
+                  $"재시작해야 적용됩니다 (지금은 {running})</color>";
         }
 
         // ── 위젯 ──────────────────────────────────────────────────────────────
@@ -249,6 +289,141 @@ namespace StoryRest.ArUco
             });
 
             _syncers.Add(Sync);
+        }
+
+        void DropdownRow(Transform parent, string label, string[] options, string help,
+                         Func<int> get, Action<int> set)
+        {
+            var row = Row(parent, label, help);
+            var dropdown = Dropdown(row, options);
+
+            void Sync() => dropdown.SetValueWithoutNotify(Mathf.Clamp(get(), 0, options.Length - 1));
+
+            dropdown.onValueChanged.AddListener(v =>
+            {
+                if (_syncing) return;
+                set(v);
+                Sync();
+            });
+
+            _syncers.Add(Sync);
+        }
+
+        // uGUI Dropdown 은 목록 템플릿(Template > Viewport > Content > Item(Toggle))이 있어야 열린다.
+        // 씬에 드롭다운이 없어 빌려 올 것이 없으므로 기본 프리팹과 같은 구조를 코드로 만든다.
+        Dropdown Dropdown(RectTransform row, string[] options)
+        {
+            const float itemHeight = 26f;
+
+            var go = new GameObject("Dropdown", typeof(RectTransform));
+            go.transform.SetParent(row, false);
+
+            // 슬라이더 + 값 칸과 같은 폭을 차지해 다른 줄과 오른쪽 끝이 맞는다.
+            var element = go.AddComponent<LayoutElement>();
+            element.preferredWidth = 286f;
+            element.preferredHeight = itemHeight;
+
+            var background = go.AddComponent<Image>();
+            background.color = new Color(1f, 1f, 1f, 0.15f);
+
+            var caption = Label(go.transform, "Label", TextAnchor.MiddleLeft);
+            Stretch(caption.rectTransform, new Vector2(10f, 2f), new Vector2(-28f, -2f));
+
+            var arrow = Label(go.transform, "Arrow", TextAnchor.MiddleCenter);
+            arrow.text = "▼";
+            arrow.fontSize = _fontSize - 6;
+            arrow.rectTransform.anchorMin = new Vector2(1f, 0f);
+            arrow.rectTransform.anchorMax = new Vector2(1f, 1f);
+            arrow.rectTransform.sizeDelta = new Vector2(24f, 0f);
+            arrow.rectTransform.anchoredPosition = new Vector2(-14f, 0f);
+
+            // ── 목록 템플릿 (닫혀 있을 때는 꺼 둔다. Dropdown 이 열 때 복제한다) ──
+            var template = new GameObject("Template", typeof(RectTransform)).GetComponent<RectTransform>();
+            template.SetParent(go.transform, false);
+            template.anchorMin = new Vector2(0f, 0f);
+            template.anchorMax = new Vector2(1f, 0f);
+            template.pivot = new Vector2(0.5f, 1f);
+            template.anchoredPosition = new Vector2(0f, 2f);
+            template.sizeDelta = new Vector2(0f, itemHeight * options.Length + 14f);
+
+            var templateImage = template.gameObject.AddComponent<Image>();
+            templateImage.color = new Color(0.12f, 0.12f, 0.12f, 0.98f);
+
+            var viewport = new GameObject("Viewport", typeof(RectTransform)).GetComponent<RectTransform>();
+            viewport.SetParent(template, false);
+            Stretch(viewport, new Vector2(4f, 4f), new Vector2(-4f, -4f));
+            viewport.pivot = new Vector2(0f, 1f);
+
+            viewport.gameObject.AddComponent<Image>().color = Color.white;
+            viewport.gameObject.AddComponent<Mask>().showMaskGraphic = false;
+
+            var content = new GameObject("Content", typeof(RectTransform)).GetComponent<RectTransform>();
+            content.SetParent(viewport, false);
+            content.anchorMin = new Vector2(0f, 1f);
+            content.anchorMax = new Vector2(1f, 1f);
+            content.pivot = new Vector2(0.5f, 1f);
+            content.sizeDelta = new Vector2(0f, itemHeight);
+
+            var item = new GameObject("Item", typeof(RectTransform)).GetComponent<RectTransform>();
+            item.SetParent(content, false);
+            item.anchorMin = new Vector2(0f, 0.5f);
+            item.anchorMax = new Vector2(1f, 0.5f);
+            item.sizeDelta = new Vector2(0f, itemHeight);
+
+            var itemBackground = Image(item, "Item Background", Color.white);
+            Stretch(itemBackground.rectTransform, Vector2.zero, Vector2.zero);
+
+            var itemCheck = Image(item, "Item Checkmark", new Color(0.35f, 0.7f, 1f, 1f));
+            itemCheck.rectTransform.anchorMin = itemCheck.rectTransform.anchorMax = new Vector2(0f, 0.5f);
+            itemCheck.rectTransform.sizeDelta = new Vector2(8f, 8f);
+            itemCheck.rectTransform.anchoredPosition = new Vector2(12f, 0f);
+
+            var itemLabel = Label(item, "Item Label", TextAnchor.MiddleLeft);
+            Stretch(itemLabel.rectTransform, new Vector2(24f, 1f), new Vector2(-10f, -1f));
+
+            var toggle = item.gameObject.AddComponent<Toggle>();
+            toggle.targetGraphic = itemBackground;
+            toggle.graphic = itemCheck;
+            toggle.isOn = true;
+
+            // 항목 바탕은 흰 판에 알파만 곱한다 — 평소엔 거의 비치고 마우스를 올리면 밝아진다.
+            var colors = toggle.colors;
+            colors.normalColor = new Color(1f, 1f, 1f, 0.06f);
+            colors.highlightedColor = new Color(1f, 1f, 1f, 0.3f);
+            colors.selectedColor = new Color(1f, 1f, 1f, 0.3f);
+            colors.pressedColor = new Color(1f, 1f, 1f, 0.45f);
+            toggle.colors = colors;
+
+            var scroll = template.gameObject.AddComponent<ScrollRect>();
+            scroll.content = content;
+            scroll.viewport = viewport;
+            scroll.horizontal = false;
+            scroll.movementType = ScrollRect.MovementType.Clamped;
+
+            template.gameObject.SetActive(false);
+
+            var dropdown = go.AddComponent<Dropdown>();
+            dropdown.targetGraphic = background;
+            dropdown.template = template;
+            dropdown.captionText = caption;
+            dropdown.itemText = itemLabel;
+
+            dropdown.options.Clear();
+            for (int i = 0; i < options.Length; i++) dropdown.options.Add(new Dropdown.OptionData(options[i]));
+
+            return dropdown;
+        }
+
+        Text Label(Transform parent, string name, TextAnchor anchor)
+        {
+            var go = new GameObject(name, typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+
+            var text = go.AddComponent<Text>();
+            ApplyTextStyle(text);
+            text.alignment = anchor;
+            text.horizontalOverflow = HorizontalWrapMode.Overflow;
+            return text;
         }
 
         RectTransform Row(Transform parent, string label, string help)

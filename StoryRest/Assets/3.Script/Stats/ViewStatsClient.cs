@@ -43,12 +43,34 @@ namespace StoryRest.Stats
 
         readonly Dictionary<string, DaySync> _syncing = new Dictionary<string, DaySync>();
 
+        /// <summary>
+        /// 주고받은 것 한 줄씩 — "→ 내용" 보냄, "← 내용" 받음, 연결/끊김. 메인 스레드에서 난다.
+        /// sync 로 받는 수백 줄은 synced 가 올 때 한 줄로 접는다. ESC 의 TCP 패널이 구독한다.
+        /// </summary>
+        public event Action<string> Traffic;
+
         public bool IsConnected { get; private set; }
         public string Host => _host;
         public int Port => _port;
 
         /// <summary>마지막으로 한 건을 받은 시각(Time.unscaledTime). 0 이면 아직 없음.</summary>
         public float LastReceivedAt { get; private set; }
+
+        /// <summary>마지막으로 받은 줄. "지금 뭐가 들어왔나" 를 눈으로 맞춰 보는 용도.</summary>
+        public string LastReceivedLine { get; private set; } = "";
+
+        /// <summary>이번 실행에서 실시간으로 받아 적은 건수(sync 로 받은 것은 세지 않는다).</summary>
+        public int ReceivedThisRun { get; private set; }
+
+        /// <summary>아직 synced 가 오지 않은 날 수. 0 이면 재동기화가 끝난 것.</summary>
+        public int SyncPendingDays => _syncing.Count;
+
+        /// <summary>마지막 재동기화로 받아 맞춘 건수(31일 합계)와 그 시각.</summary>
+        public int LastSyncLines { get; private set; }
+        public float LastSyncedAt { get; private set; }
+
+        /// <summary>이번 실행에서 연결이 된 횟수. 1보다 크면 그 사이에 끊긴 적이 있다.</summary>
+        public int ConnectCount { get; private set; }
 
         public void Setup(string host, int port)
         {
@@ -80,11 +102,17 @@ namespace StoryRest.Stats
             {
                 IsConnected = connected;
 
-                if (connected) RequestSync();
+                if (connected)
+                {
+                    ConnectCount++;
+                    Traffic?.Invoke($"<color=#7fe07f>연결됨 {_host}:{_port}</color>");
+                    RequestSync();
+                }
                 else
                 {
                     _syncing.Clear();
                     Debug.LogWarning("[Stats] ArUco PC 와 끊겼습니다. 다시 붙으면 최근 기록을 다시 받습니다.");
+                    Traffic?.Invoke($"<color=#ffd633>끊김 {_host}:{_port} — {ReconnectSeconds:0}초마다 재시도</color>");
                 }
             }
 
@@ -94,6 +122,7 @@ namespace StoryRest.Stats
         void RequestSync()
         {
             _syncing.Clear();
+            LastSyncLines = 0;
 
             var today = DateTime.Now.Date;
             for (int i = SyncDays - 1; i >= 0; i--)
@@ -105,6 +134,7 @@ namespace StoryRest.Stats
             }
 
             Debug.Log($"[Stats] ArUco PC 연결됨 — 최근 {SyncDays}일 기록을 다시 받습니다.");
+            Traffic?.Invoke($"→ sync ×{SyncDays} (최근 {SyncDays}일 요청)");
         }
 
         void Handle(string line)
@@ -139,6 +169,9 @@ namespace StoryRest.Stats
             }
 
             LastReceivedAt = Time.unscaledTime;
+            LastReceivedLine = csv;
+            ReceivedThisRun++;
+            Traffic?.Invoke($"← view {csv}");
             ViewLog.Append(record); // 미러에 적고 Recorded 를 낸다 — ArUco PC 와 같은 경로
         }
 
@@ -147,6 +180,15 @@ namespace StoryRest.Stats
             string key = rest.Length >= 10 ? rest.Substring(0, 10) : rest;
             if (!_syncing.TryGetValue(key, out var sync)) return;
             _syncing.Remove(key);
+
+            LastSyncLines += sync.lines.Count;
+            if (_syncing.Count == 0) LastSyncedAt = Time.unscaledTime;
+
+            // 빈 날까지 31줄을 찍으면 로그가 그것으로 차 버린다. 받은 것이 있는 날과 마지막만 남긴다.
+            if (sync.lines.Count > 0)
+                Traffic?.Invoke($"← view ×{sync.lines.Count} + synced {key}");
+            if (_syncing.Count == 0)
+                Traffic?.Invoke($"재동기화 끝 — {SyncDays}일에서 {LastSyncLines}건");
 
             // 서버에 없는 날은 파일을 만들지 않는다 — 31개의 빈 파일이 생기는 것을 막는다.
             if (sync.lines.Count == 0 && !File.Exists(ViewLog.FileFor(sync.day))) return;

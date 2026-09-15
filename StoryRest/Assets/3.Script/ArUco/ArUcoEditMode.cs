@@ -34,8 +34,11 @@ namespace StoryRest.ArUco
         }
 
         [Header("키")]
-        [SerializeField] KeyCode toggleKey = KeyCode.F1;
-        [SerializeField] KeyCode stageKey = KeyCode.F2;
+        // F1 은 단축키 안내(ArUcoHelpPanel), F4 는 관람 기록(ArUcoStatsPanel)이 쓴다.
+        [SerializeField] KeyCode toggleKey = KeyCode.F2;
+        [SerializeField] KeyCode stageKey = KeyCode.F3;
+        // 카메라 없이 콘텐츠 파일만 점검하는 격자(→ ArUcoSet.DebugPreview). 편집모드와 무관하게 받는다.
+        [SerializeField] KeyCode debugPreviewKey = KeyCode.F6;
         [SerializeField] KeyCode nextMarkerKey = KeyCode.Tab;
         // 한 마커가 영상과 이미지를 함께 띄우므로 그 안에서 장을 고르는 키가 따로 필요하다.
         [SerializeField] KeyCode prevItemKey = KeyCode.Comma;
@@ -66,6 +69,7 @@ namespace StoryRest.ArUco
         [SerializeField] float calibrationMarkerSize = 0.18f;
 
         StoryRestApp _app;
+        ArUcoHelpPanel _help;
 
         bool _active;
         bool _cursorWasVisible;
@@ -112,9 +116,13 @@ namespace StoryRest.ArUco
 
         public bool IsActive => _active;
 
+        public KeyCode ToggleKey => toggleKey;
+        public KeyCode DebugPreviewKey => debugPreviewKey;
+
         void Awake()
         {
             _app = GetComponent<StoryRestApp>();
+            _help = GetComponent<ArUcoHelpPanel>();
         }
 
         void OnDestroy()
@@ -137,6 +145,7 @@ namespace StoryRest.ArUco
         void LateUpdate()
         {
             if (Input.GetKeyDown(toggleKey)) SetActive(!_active);
+            if (Input.GetKeyDown(debugPreviewKey)) ToggleDebugPreview();
 
             if (!_active)
             {
@@ -221,6 +230,26 @@ namespace StoryRest.ArUco
             for (int i = 0; i < _app.Sets.Count; i++) _app.Sets[i].CameraPreviewEnabled = !anyOn;
 
             MarkDirty();
+        }
+
+        /// <summary>
+        /// 디버그 격자를 모든 세트에서 한꺼번에 뒤집는다. 표시 스위치라 편집모드 안팎 어디서든 받되,
+        /// 파일에는 남기지 않는다(→ ArUcoSet.DebugPreview).
+        /// </summary>
+        void ToggleDebugPreview()
+        {
+            if (_app == null || _app.Sets.Count == 0) return;
+
+            bool anyOn = false;
+            for (int i = 0; i < _app.Sets.Count; i++)
+            {
+                if (!_app.Sets[i].DebugPreview) continue;
+
+                anyOn = true;
+                break;
+            }
+
+            for (int i = 0; i < _app.Sets.Count; i++) _app.Sets[i].DebugPreview = !anyOn;
         }
 
         void HandleSetSelection()
@@ -813,8 +842,9 @@ namespace StoryRest.ArUco
         void UpdateHud(ArUcoSet set)
         {
             _builder.Clear();
-            _builder.Append("<color=#ffd633><b>편집모드</b></color>   <color=#888888>F1 나가기 · F2 단계 · " +
-                            $"{hudKey} 안내판 {(_hudSlot == HudSlotCompact ? "펼치기" : "옮기기")}</color>");
+            _builder.Append($"<color=#ffd633><b>편집모드</b></color>   <color=#888888>{toggleKey} 나가기 · {stageKey} 단계 · " +
+                            $"{hudKey} 안내판 {(_hudSlot == HudSlotCompact ? "펼치기" : "옮기기")}" +
+                            $"{(_help != null && !_help.IsVisible ? $" · {_help.ToggleKey} 단축키" : "")}</color>");
 
             // 접은 상태 — 마커를 가리지 않게 첫 줄만 남긴다. 저장 대기 표시는 놓치면 안 되므로 같이 둔다.
             if (_hudSlot == HudSlotCompact)
@@ -851,8 +881,52 @@ namespace StoryRest.ArUco
 
             if (_dirty) _builder.Append("   <color=#ffd633>* 저장 대기</color>");
 
+            // 편집 중에는 HUD 가 이 세트의 화면을 쓰고 있으므로 단축키 안내를 따로 띄우지 않고 여기에 이어 붙인다.
+            if (_help != null && _help.IsVisible)
+            {
+                _builder.AppendLine();
+                _builder.AppendLine();
+                _help.AppendHelp(_builder);
+            }
+
             set.View.ShowHud(_builder.ToString(), HudAnchorFor(_hudSlot));
             HideOtherHuds();
+        }
+
+        /// <summary>
+        /// 편집모드 안에서 쓰는 키 전부. 단축키 안내(F1)가 읽는다.
+        /// 필드 값을 그대로 쓰므로 인스펙터에서 키를 바꿔도 안내가 따라온다.
+        /// </summary>
+        public void AppendKeyHelp(StringBuilder b)
+        {
+            const string k = "<color=#ffd633>";
+            const string d = "</color><pos=46%>";
+
+            b.AppendLine($"{k}{stageKey}{d}단계 전환 (마커 배치 ↔ 코너 보정)");
+            b.AppendLine($"{k}1 ~ 9{d}조정할 세트 선택");
+            b.AppendLine($"{k}{nextMarkerKey} / Shift+{nextMarkerKey}{d}마커 선택");
+            b.AppendLine($"{k}, / .{d}그 마커 안에서 파일 선택 (마커 전체 ↔ 파일 한 장)");
+            b.AppendLine($"{k}← → ↑ ↓  + -{d}세트 전체 위치 · 크기");
+            b.AppendLine($"{k}Ctrl + ← → ↑ ↓  + -  [ ]{d}선택한 대상 위치 · 크기 · 회전");
+            b.AppendLine($"{k}PageUp / PageDown{d}세트 전체 배율");
+            b.AppendLine($"{k}{actionKey}{d}코너 보정 진행 (자동 → 수동 → 점 확정 → 완료)");
+            b.AppendLine($"{k}+ -  (수동 보정 중){d}조준 사각형 크기");
+            b.AppendLine($"{k}{resetMarkerKey} / Ctrl+{resetMarkerKey}{d}세트 전체 초기화 / 선택한 대상 초기화");
+            b.AppendLine($"{k}{contentKey}  {outlineKey}  {perspectiveKey}  {reloadContentKey}{d}콘텐츠 표시 · 마커 테두리 · 원근 · 콘텐츠 다시 읽기");
+            b.AppendLine($"{k}{hudKey}{d}안내판 자리 옮기기 (네 귀퉁이 → 한 줄로 접기)");
+            b.AppendLine($"{k}{KeyName(saveKey)}{d}즉시 저장 (그 밖에는 {autoSaveDelay:0.#}초 무입력 시 자동 저장)");
+            b.AppendLine($"{k}Shift 병행{d}미세조정");
+        }
+
+        // KeyCode 이름 중 키캡과 다른 것만 바꾼다.
+        public static string KeyName(KeyCode key)
+        {
+            switch (key)
+            {
+                case KeyCode.Return: return "Enter";
+                case KeyCode.Escape: return "Esc";
+                default: return key.ToString();
+            }
         }
 
         // HUD 는 선택한 세트에만 띄운다. 다른 세트는 전시 상태를 유지한다.

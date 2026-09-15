@@ -82,6 +82,8 @@ AVPro 도 마찬가지로 `Runtime/Plugins/Windows/` 만 있으면 된다.
 
 개발 PC 에 웹캠이 없어도 아래는 확인할 수 있다.
 
-- `aruco.json` 의 `debugPreviewContent` 를 켜면 마커 인식 없이 영상이 화면에 격자로 뜬다.
+- `F6` 을 누르거나 `aruco.json` 의 `debugPreviewContent` 를 켜면 마커 인식 없이 영상이 화면에 격자로 뜬다.
+- `F1` 을 누르면 단축키 표가 화면에 뜬다.
+- 2·3층에서 월 PC 가 ArUco PC 에 붙었는지는 양쪽 PC 에서 `F7` 로 본다.
 - 키워드 월은 카메라와 무관하게 동작한다.
 - 에디터에서는 Game 뷰 상단의 **Display 드롭다운**으로 세트별·키워드월별 화면을 골라 본다.

@@ -25,6 +25,7 @@ public class SettingsPanelUI : MonoBehaviour
 
     /// <summary>다른 스크립트가 줄을 덧붙일 수 있게 패널 루트를 연다(ArUcoSettingsPanel).</summary>
     public GameObject PanelRoot => panelRoot;
+    public KeyCode ToggleKey => toggleKey;
 
     /// <summary>창이 열리고 닫힐 때. 덧붙인 줄이 열 때 값을 다시 읽고 닫을 때 저장하는 데 쓴다.</summary>
     public event System.Action<bool> VisibilityChanged;

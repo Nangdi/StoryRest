@@ -7,7 +7,7 @@ using UnityEngine;
 namespace StoryRest.ArUco
 {
     /// <summary>
-    /// 관람 기록 디버그 패널. F3 으로 켜고 끈다.
+    /// 관람 기록 디버그 패널. F4 로 켜고 끈다.
     ///
     /// "지금 세고 있나", "오늘 몇 번 세어졌나" 를 CSV 를 열지 않고 화면에서 바로 본다.
     /// 세트마다 그 세트의 화면에 뜬다 — 세트끼리 기록이 따로이기 때문이다(→ SPEC §2).
@@ -17,7 +17,7 @@ namespace StoryRest.ArUco
     /// </summary>
     public class ArUcoStatsPanel : MonoBehaviour
     {
-        [SerializeField] KeyCode toggleKey = KeyCode.F3;
+        [SerializeField] KeyCode toggleKey = KeyCode.F4;
 
         [Tooltip("오늘 파일을 다시 읽는 주기(초). 관람이 끝날 때마다 파일에 한 줄이 붙으므로 주기적으로 따라잡는다.")]
         [SerializeField] float refreshSeconds = 2f;
@@ -27,6 +27,7 @@ namespace StoryRest.ArUco
 
         StoryRestApp _app;
         ArUcoEditMode _editMode;
+        ArUcoHelpPanel _help;
 
         bool _visible;
         float _nextRefresh;
@@ -43,11 +44,13 @@ namespace StoryRest.ArUco
         readonly StringBuilder _builder = new StringBuilder(1024);
 
         public bool IsVisible => _visible;
+        public KeyCode ToggleKey => toggleKey;
 
         void Awake()
         {
             _app = GetComponent<StoryRestApp>();
             _editMode = GetComponent<ArUcoEditMode>();
+            _help = GetComponent<ArUcoHelpPanel>();
         }
 
         // 편집모드(LateUpdate)가 HUD 를 그린 뒤에 돌아야 서로 덮어쓰지 않는다.
@@ -59,8 +62,9 @@ namespace StoryRest.ArUco
             if (Input.GetKeyDown(toggleKey)) SetVisible(!_visible);
             if (!_visible) return;
 
-            // 편집모드가 HUD 를 쓰는 동안은 비켜 준다. 나가면 다음 프레임에 다시 그린다.
+            // 편집모드나 단축키 안내가 HUD 를 쓰는 동안은 비켜 준다. 닫히면 다음 프레임에 다시 그린다.
             if (_editMode != null && _editMode.IsActive) return;
+            if (_help != null && _help.IsVisible) return;
 
             float now = Time.unscaledTime;
             if (now >= _nextRefresh)
@@ -79,8 +83,9 @@ namespace StoryRest.ArUco
 
             if (visible) return;
 
-            // 편집모드가 켜져 있으면 HUD 는 편집모드 것이다. 건드리지 않는다.
+            // 편집모드나 단축키 안내가 켜져 있으면 HUD 는 그쪽 것이다. 건드리지 않는다.
             if (_editMode != null && _editMode.IsActive) return;
+            if (_help != null && _help.IsVisible) return;
             for (int i = 0; i < _app.Sets.Count; i++) _app.Sets[i].View.ShowHud(null);
         }
 

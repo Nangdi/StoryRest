@@ -50,6 +50,12 @@ namespace StoryRest.ArUco
         public bool SuppressContent { get; set; }
 
         /// <summary>
+        /// 마커 인식 없이 콘텐츠를 격자로 늘어놓는 디버그 표시. 설정(debugPreviewContent)으로 시작하되
+        /// 실행 중 F6 으로 뒤집을 수 있다. 파일에는 남기지 않는다 — 전시 중 켜 둔 채 저장되면 안 된다.
+        /// </summary>
+        public bool DebugPreview { get; set; }
+
+        /// <summary>
         /// 카메라 영상을 화면에 깔지. 편집모드 밖에서도 동작하며 값은 설정에 남는다
         /// (→ SetConfig.showCameraPreview). 켜져 있는 동안만 프레임을 텍스처로 올린다.
         /// </summary>
@@ -104,6 +110,7 @@ namespace StoryRest.ArUco
             _content = content;
             _images = images;
             _floor = floor;
+            DebugPreview = config.debugPreviewContent;
 
             if (config.recordViews)
                 _views = new ArUcoViewCounter(floor, set.name, config.viewMinDwellSeconds, config.viewResumeGraceSeconds);
@@ -192,10 +199,18 @@ namespace StoryRest.ArUco
             // Initialize 를 다시 거치기 전까지는 아무것도 하지 않는다.
             if (_tracker == null || _view == null || _library == null || _config == null || _set == null) return;
 
-            if (_config.debugPreviewContent)
+            if (DebugPreview)
             {
                 DrawContentPreview();
                 return;
+            }
+
+            // 격자를 끄면 항등으로 바꿔 둔 변환을 카메라 기준으로 되돌린다.
+            if (_previewProjectionReady)
+            {
+                _previewProjectionReady = false;
+                _projectionReady = false;
+                _view.ShowStatus(null);
             }
 
             if (!_tracker.IsInitialized)
@@ -374,7 +389,7 @@ namespace StoryRest.ArUco
         }
 
         /// <summary>
-        /// 마커 인식 없이 등록된 콘텐츠를 화면에 격자로 늘어놓는다(debugPreviewContent).
+        /// 마커 인식 없이 등록된 콘텐츠를 화면에 격자로 늘어놓는다(DebugPreview).
         /// 카메라가 없는 자리에서 영상 파일과 재생 경로만 점검할 때 쓴다.
         /// </summary>
         void DrawContentPreview()
@@ -408,7 +423,7 @@ namespace StoryRest.ArUco
             }
 
             _view.ShowStatus($"[디버그] 콘텐츠 미리보기 — 마커 {ids.Count}개 · 파일 {_previewEntries.Count}개 " +
-                             $"— 전시 전에 debugPreviewContent 를 끄세요");
+                             $"— 전시 전에 F6 으로 끄세요 (aruco.json 의 debugPreviewContent 도 확인)");
 
             int columns = Mathf.CeilToInt(Mathf.Sqrt(_previewEntries.Count));
             int rows = Mathf.CeilToInt(_previewEntries.Count / (float)columns);

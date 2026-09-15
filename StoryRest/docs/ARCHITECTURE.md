@@ -198,7 +198,10 @@
 | `ViewLog` (`Stats/`) | 관람 건별 CSV append/읽기. `persistentDataPath/stats/`. `Recorded` / `DayRewritten` 이벤트 | **신규** |
 | `ViewStatsServer` (`Stats/`) | role=aruco. TCP 로 대기, 적힌 줄을 그대로 월 PC 에 보냄. `sync` 요청에 하루치 응답 | **신규** |
 | `ViewStatsClient` (`Stats/`) | role=wall. `TcpClientChannel` 로 붙어 받은 줄을 미러 CSV 에 적음. 접속 시 31일치 재동기화 | **신규** |
-| `ArUcoStatsPanel` | 관람 기록 디버그 패널 (`F3`). 지금 세는 중인 마커 · 오늘 순위 | **신규** |
+| `ArUcoStatsPanel` | 관람 기록 디버그 패널 (`F4`). 지금 세는 중인 마커 · 오늘 순위 | **신규** |
+| `ArUcoHelpPanel` | 단축키 안내 (`F1`). 각 컴포넌트의 키 필드를 읽어 표를 만든다 | **신규** |
+| `ViewStatsLinkPanel` (`Stats/`) | 관람 기록 링크 상태 (`F7`). 월 PC 연결 · 마지막 송수신. 세트가 없는 wall 에도 뜨도록 자기 캔버스를 디스플레이 0 에 띄운다 | **신규** |
+| `ViewStatsTrafficPanel` (`Stats/`) | ESC 설정창 오른쪽의 TCP 패널. 연결 상태 + 송수신 로그(최근 150줄). 서버·클라이언트의 `Traffic` 이벤트를 쌓는다 | **신규** |
 | `ArUcoProjectionView` | `H_camproj` 적용 + 워프 메시 배치 + 디스플레이 출력 | **신규** (`ArUcoPageOverlay` 분해) |
 | `ArUcoHomography` | 4점 → 사영변환 | **그대로** |
 | `ArUcoWarpedImage` | 비사각형 텍스처 렌더 | **소폭 수정** (`Texture2D` → `Texture`) |
@@ -374,11 +377,18 @@ ArUco PC 한 대가 세트 2개를 도는 구성에서 가장 크게 절약되�
 | 움직임 부드럽게 | `smoothing` | 즉시 |
 | 동시 표시 마커 수 | `maxSimultaneous` | 즉시 |
 | 원근 매핑 / 관람 기록 | `perspectiveMapping` / `recordViews` | 즉시 |
-| 이 PC 의 층 | `Setting.json` `floor` | **재시작 후** (저장만 하고 안내) |
-| 이 PC 의 역할 | `Setting.json` `role` | 창에서는 안 바꾼다 — 현재 역할과 링크 주소만 표시. PC 를 바꿔 꽂는 일이라 파일을 고치고 재시작 |
+| 이 PC 의 층 | `Setting.json` `floor` | 드롭다운(1~3층). **재시작 후** (고르면 바로 저장하고 안내) |
+| 이 PC 의 역할 | `Setting.json` `role` | 드롭다운(all / aruco / wall). **재시작 후**. 링크 주소(statsHost/Port)는 표시만 |
 
 값을 바꾸면 `ArUcoSet.ApplyConfig()` 가 살아 있는 트래커·플레이어 풀·카운터에 다시 밀어 넣고, 1초 뒤(또는 창을 닫을 때)
 `aruco.json` 에 저장한다. 창은 디스플레이 0(세트 A 프로젝터)에만 뜬다 — `SettingsCanvas` 가 거기 있다.
+
+층·역할 줄은 **월 PC(wall)에도 있어야** 하므로 판은 세트 유무와 무관하게 붙인다(`StoryRestApp.AttachSettingsPanel`).
+같은 자리에서 **TCP 패널**(`ViewStatsTrafficPanel`)도 붙인다 — 설정창과 같이 열리고 닫히며, 설정창(가운데 680 폭)과
+겹치지 않게 화면 오른쪽 끝에 선다. 연결 상태 한 줄 + 송수신 로그(`→` 보냄 · `←` 받음 · 연결/끊김, 시각 포함).
+`sync` 응답은 수백 줄이라 `view ×N + synced <날짜>` 한 줄로 접는다.
+세트가 없는 역할에서는 ArUco 조절값 줄을 만들지 않는다. 드롭다운은 씬에 빌려 올 것이 없어
+uGUI 기본 프리팹과 같은 구조(Template › Viewport › Content › Item)를 코드로 만든다.
 
 ## 5. 콘텐츠 — 영상 + 이미지
 
@@ -440,7 +450,7 @@ ArUcoSet ── 매 프레임 _visibleIds ──▶ ArUcoViewCounter (세트별)
 - 종료(`OnDestroy`) 시 진행 중이던 관람을 그때까지의 시간으로 적는다. 전원이 끊기면 그 순간 보던 것만 잃는다.
 - 파일은 **append 만** 한다. 통째로 다시 쓰다 전원이 끊기면 지난 기록이 전부 날아갈 수 있기 때문이다.
 - 전시용 집계는 만들지 않았다. 순위 화면이 정해지면 이 CSV 들을 읽어 계산하는 쪽을 따로 붙인다.
-  `ViewLog.ReadDay` 와 `ArUcoStatsPanel`(F3 디버그 패널) 의 오늘 집계가 그 출발점이다.
+  `ViewLog.ReadDay` 와 `ArUcoStatsPanel`(F4 디버그 패널) 의 오늘 집계가 그 출발점이다.
 
 ### 관람 기록 링크 — ArUco PC → 월 PC
 
@@ -463,6 +473,11 @@ ViewLog.Append ─▶ CSV 원본                        ViewStatsClient ─▶ V
 - **연출 쪽은 역할을 모른다.** `all` 이든 `wall` 이든 `ViewLog.ReadDay` / `Recorded` / `DayRewritten` 만 보면 같은 것이 보인다.
   파일로 남기므로 ArUco PC 가 잠깐 꺼져 있어도 지난 순위는 계속 낼 수 있다.
 - 연결이 없으면 서버는 파일에만 적는다. 잃는 것이 없다. 재접속 · 채널은 기존 `TcpClientChannel` 을 그대로 쓴다.
+- **보내는 시점은 "마커가 잡혔을 때" 가 아니라 "관람 한 건이 끝났을 때"** 다. 카운터가 `lastSeen` 뒤 `resumeGrace` 가
+  지나야 건을 확정해 `ViewLog.Append` 하고, 그 순간 `Recorded` → `Broadcast` 로 붙어 있는 모든 클라이언트에 한 줄이 나간다.
+  그래서 월 PC 에는 관람이 시작되고 최소 `viewMinDwell + viewResumeGrace` 초 뒤에 도착한다.
+- **`F7` — 링크 상태 패널**(`ViewStatsLinkPanel`). aruco 에서는 대기 포트 · 붙어 있는 월 PC 주소 · 마지막 전송,
+  wall 에서는 연결 여부 · 재동기화 진행 · 마지막 수신을 보여 준다. all 에서는 "통신 없음" 이 떠서 역할을 잘못 잡은 것을 알아챈다.
 - 검증(2026-09-11): 에디터 `role=aruco` + Python 클라이언트로 `sync` 19건 응답 확인,
   `role=wall` + Python 가짜 서버로 31일 재동기화 · 중복 제거 · 실시간 append · 끊김 후 재접속 확인.
 
@@ -492,9 +507,11 @@ ArUcoImageCache (StoryRestApp 이 하나만 만들어 모든 세트가 공유)
 
 ### 카메라 없이 콘텐츠 점검하기
 
-`aruco.json`의 `debugPreviewContent`를 켜면 마커 인식과 무관하게
+`F6` 을 누르거나 `aruco.json`의 `debugPreviewContent`를 켜면 마커 인식과 무관하게
 등록된 콘텐츠를 화면에 격자로 늘어놓는다. 카메라가 없는 자리에서 영상 파일과
 재생 경로만 빠르게 확인할 때 쓴다. **전시 중에는 반드시 꺼 둔다**(화면에 경고 문구가 뜬다).
+`F6` 은 실행 중에만 뒤집는 스위치라 파일에 남지 않는다(`ArUcoSet.DebugPreview`) —
+켜 둔 채 다른 값을 저장해도 다음 실행은 `debugPreviewContent` 값으로 시작한다.
 
 ---
 
@@ -577,8 +594,8 @@ ArUcoImageCache (StoryRestApp 이 하나만 만들어 모든 세트가 공유)
 
 | 키 | 기능 |
 |---|---|
-| `F1` | 편집모드 진입/종료 |
-| `F2` | 단계 전환 (마커 배치 ↔ 코너 보정) |
+| `F2` | 편집모드 진입/종료 |
+| `F3` | 단계 전환 (마커 배치 ↔ 코너 보정) |
 | `1`~`9` | 조정할 세트 선택 (세트가 여럿일 때) |
 | `Tab` / `Shift+Tab` | 마커 선택 |
 | `,` / `.` | 그 마커 안에서 조정할 콘텐츠 선택 (마커 전체 ↔ 파일 한 장) |
@@ -607,7 +624,13 @@ ArUcoImageCache (StoryRestApp 이 하나만 만들어 모든 세트가 공유)
   밖에서 누르면 모든 세트가 함께 토글되고, 안에서 누르면 선택한 세트만 바뀐다.
   나머지 편집 상태(하이라이트·콘텐츠 숨김·마커 테두리)는 나갈 때 전부 전시 상태로 되돌린다.
 - 편집모드 밖에서 값을 바꾸는 키는 받지 않는다(→ SPEC §6). `C`는 표시 스위치라 예외로 둔다.
-- **`F3` — 관람 기록 디버그 패널**(`ArUcoStatsPanel`). 편집모드와 무관하게 켜고 끈다.
+- **편집모드 밖에서도 받는 키 — `F1` `F4` `F6` `F7` `C`.** 전부 표시 스위치라 값을 바꾸지 않는다.
+- **`F1` — 단축키 안내**(`ArUcoHelpPanel`). 이 표를 화면에 띄운다. 키 이름은 각 컴포넌트의
+  필드에서 읽어 오므로 인스펙터에서 키를 바꿔도 안내가 따라온다. 편집모드 안에서는 HUD 가
+  화면을 쓰고 있으므로 따로 띄우지 않고 편집모드 HUD 끝에 이어 붙인다.
+- **`F6` — 디버그 격자**(→ §5 "카메라 없이 콘텐츠 점검하기"). 모든 세트를 한꺼번에 뒤집는다.
+- **`F4` — 관람 기록 디버그 패널**(`ArUcoStatsPanel`). 편집모드와 무관하게 켜고 끈다.
+- **`F7` — 관람 기록 링크 상태**(`ViewStatsLinkPanel`, → §4 "관람 기록 링크"). 디스플레이 0 우상단에 뜬다.
   세트마다 그 세트 화면에 뜨며, 지금 잡힌 마커의 상태(대기 / 세어짐 / 놓침 유예)와
   오늘 파일의 세트별 순위·평균 지속시간을 보여준다. 파일은 2초마다 다시 읽는다.
   편집모드가 켜져 있는 동안은 HUD 자리를 내주고 숨었다가 나가면 다시 뜬다.

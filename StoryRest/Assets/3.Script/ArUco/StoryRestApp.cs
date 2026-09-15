@@ -91,6 +91,24 @@ namespace StoryRest.ArUco
             CreateSets();
             CreateKeywordWalls();
             CreateStatsLink();
+            AttachSettingsPanel();
+        }
+
+        /// <summary>
+        /// ESC 설정창(씬에 있는 SettingsPanelUI)에 현장 조절값과 층·역할 줄을 덧붙인다.
+        /// 세트가 없는 월 PC 에서도 층·역할은 바꿀 수 있어야 하므로 역할과 무관하게 붙인다. 창이 없는 씬이면 조용히 건너뛴다.
+        /// </summary>
+        void AttachSettingsPanel()
+        {
+            var settingsUi = FindObjectOfType<SettingsPanelUI>(true);
+            if (settingsUi == null) return;
+
+            if (GetComponent<ArUcoSettingsPanel>() == null)
+                gameObject.AddComponent<ArUcoSettingsPanel>().Attach(settingsUi);
+
+            // 관람 기록 링크의 연결 상태 · 송수신 로그. 설정창과 같이 열리고 닫히며 오른쪽에 따로 선다.
+            if (GetComponent<ViewStatsTrafficPanel>() == null)
+                gameObject.AddComponent<ViewStatsTrafficPanel>().Attach(settingsUi);
         }
 
         /// <summary>이번 실행에서 실제로 만드는 세트. 월 PC(wall)면 비어 있다.</summary>
@@ -127,6 +145,9 @@ namespace StoryRest.ArUco
                     StatsClient.Setup(Settings.statsHost, Settings.statsPort);
                     break;
             }
+
+            // 링크 상태 패널(F7). all 에서도 붙여 "통신 없음" 을 보여 준다 — 역할을 잘못 잡은 것을 여기서 알아챈다.
+            gameObject.AddComponent<ViewStatsLinkPanel>();
         }
 
         /// <summary>
@@ -223,13 +244,10 @@ namespace StoryRest.ArUco
                           $"(빌드에서는 각자의 디스플레이로 나갑니다)");
 
             // 편집모드는 세트가 다 만들어진 뒤에 붙인다. 평상시에는 아무것도 그리지 않는다.
+            // 순서가 곧 LateUpdate 순서다 — 안내(F1) → 편집모드(F2) → 관람 기록(F4). 뒤의 것이 앞의 HUD 에 양보한다.
+            if (GetComponent<ArUcoHelpPanel>() == null) gameObject.AddComponent<ArUcoHelpPanel>();
             if (GetComponent<ArUcoEditMode>() == null) gameObject.AddComponent<ArUcoEditMode>();
             if (GetComponent<ArUcoStatsPanel>() == null) gameObject.AddComponent<ArUcoStatsPanel>();
-
-            // ESC 설정창(씬에 있는 SettingsPanelUI)에 현장 조절값 줄을 덧붙인다. 창이 없는 씬이면 조용히 건너뛴다.
-            var settingsUi = FindObjectOfType<SettingsPanelUI>(true);
-            if (settingsUi != null && GetComponent<ArUcoSettingsPanel>() == null)
-                gameObject.AddComponent<ArUcoSettingsPanel>().Attach(settingsUi);
         }
 
         void OnDestroy()
@@ -337,6 +355,10 @@ namespace StoryRest.ArUco
         {
             // 0번은 주 디스플레이라 이미 켜져 있다.
             if (index <= 0) return;
+
+            // 에디터는 모니터가 몇 대든 Display.displays 를 1개로 보고한다. 여기서 검사하면 늘 거짓 경고가 되므로
+            // 빌드에서만 따진다. 에디터에서는 Game 뷰의 Display 드롭다운으로 각 화면을 본다.
+            if (Application.isEditor) return;
 
             if (index >= Display.displays.Length)
             {
