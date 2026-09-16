@@ -21,6 +21,7 @@ namespace StoryRest.ArUco
         ArUcoProjectionView _view;
         ArUcoContentLibrary _library;
         ArUcoViewCounter _views;      // recordViews 가 꺼져 있으면 null
+        ArUcoAppearTracker _appear;   // 등장 연출 진행(→ ArUcoAppear.cs)
         int _floor;
 
         bool _projectionReady;
@@ -87,6 +88,12 @@ namespace StoryRest.ArUco
         }
         bool _suppressViewCounting;
 
+        /// <summary>
+        /// 켜면 등장 연출 없이 잡히는 즉시 그린다. 편집모드가 켠다 —
+        /// 배치를 맞추는 동안 마커를 옮길 때마다 고리와 등장을 기다리게 할 수는 없다.
+        /// </summary>
+        public bool SuppressAppear { get; set; }
+
         /// <summary>편집 중인 마커에 판을 깔아 어느 것을 조정 중인지 보이게 한다. -1 이면 표시 안 함.</summary>
         public int HighlightMarkerId { get; set; } = -1;
 
@@ -114,6 +121,8 @@ namespace StoryRest.ArUco
 
             if (config.recordViews)
                 _views = new ArUcoViewCounter(floor, set.name, config.viewMinDwellSeconds, config.viewResumeGraceSeconds);
+
+            _appear = new ArUcoAppearTracker(config.appear) { GraceSeconds = config.viewResumeGraceSeconds };
 
             _view = gameObject.AddComponent<ArUcoProjectionView>();
             _view.Setup(set.name, displayIndex, viewport, setIndex);
@@ -178,6 +187,12 @@ namespace StoryRest.ArUco
             {
                 _views.MinDwellSeconds = _config.viewMinDwellSeconds;
                 _views.ResumeGraceSeconds = _config.viewResumeGraceSeconds;
+            }
+
+            if (_appear != null)
+            {
+                _appear.Config = _config.appear;
+                _appear.GraceSeconds = _config.viewResumeGraceSeconds;
             }
         }
 
@@ -273,6 +288,12 @@ namespace StoryRest.ArUco
             _visibleIds.Clear();
             _view.BeginFrame();
 
+            // 연출 상태는 편집모드에서도 계속 따라간다 — 켜고 끌 때 처음부터 다시 읽지 않게.
+            float now = Time.unscaledTime;
+            _appear?.Update(markers, now);
+            bool animate = _appear != null && !SuppressAppear;
+            var effect = _config.appear != null ? _config.appear.Effect : AppearEffect.None;
+
             int drawn = 0;
 
             for (int i = 0; i < markers.Count && drawn < limit; i++)
@@ -293,6 +314,18 @@ namespace StoryRest.ArUco
                 var style = ArUcoDrawStyle.Default(
                     _set.globalScale, new Vector2(_set.globalOffsetX, _set.globalOffsetY),
                     _config.warpSubdivisions, _config.perspectiveMapping);
+
+                // 등장 연출: 움직이는 중·읽는 중이면 콘텐츠 대신 고리만(또는 아무것도) 그린다.
+                var appear = new AppearFrame { drawContent = true, ringT = -1f, appearT = 1f };
+                if (animate && _appear.TryGet(marker, now, out var frame)) appear = frame;
+
+                if (appear.ringT >= 0f) _view.DrawRing(plane, appear.ringT, style);
+                if (!appear.drawContent)
+                {
+                    // 자리는 잡은 셈이다 — 동시 표시 상한은 읽는 중인 마커도 센다.
+                    drawn++;
+                    continue;
+                }
 
                 var entries = _content != null ? _content.GetEntries(marker.id) : null;
 
@@ -343,7 +376,14 @@ namespace StoryRest.ArUco
                         style.tint = PlaceholderColor(marker.id, true);
                     }
 
-                    if (_view.Draw(plane, placement, style)) any = true;
+                    // 연출은 이 장의 복사본에만 건다. 하이라이트는 조정 중인 원래 자리를 보여야 한다.
+                    var drawPlacement = placement;
+                    var drawStyle = style;
+                    if (appear.appearT < 1f)
+                        ArUcoAppearTracker.Apply(effect, _config.appear, appear.appearT, ref drawPlacement, ref drawStyle);
+
+                    bool drawable = drawPlacement.scale > 0.001f && drawStyle.tint.a > 0.001f;
+                    if (drawable && _view.Draw(plane, drawPlacement, drawStyle)) any = true;
 
                     if (marker.id == HighlightMarkerId && e == HighlightItemIndex)
                         _view.DrawHighlight(plane, placement, style);

@@ -195,6 +195,7 @@
 | `ArUcoContentLibrary` | 경로 → 영상 텍스처. AVPro 플레이어 풀 | **신규** (`ArUcoImageLibrary` 대체) |
 | `ArUcoImageCache` | 경로 → 이미지 텍스처. 비동기 로드 + LRU. 세트 공유 | **신규** |
 | `ArUcoViewCounter` | 마커 관람 판정(유지 시간 · 복귀 유예). 세트별 | **신규** |
+| `ArUcoAppearTracker` (`ArUcoAppear.cs`) | 등장 연출 상태(움직임 → 멈춤 판정 → 읽는 중 → 뜸)와 연출 함수. 세트별 | **신규** |
 | `ViewLog` (`Stats/`) | 관람 건별 CSV append/읽기. `persistentDataPath/stats/`. `Recorded` / `DayRewritten` 이벤트 | **신규** |
 | `ViewStatsServer` (`Stats/`) | role=aruco. TCP 로 대기, 적힌 줄을 그대로 월 PC 에 보냄. `sync` 요청에 하루치 응답 | **신규** |
 | `ViewStatsClient` (`Stats/`) | role=wall. `TcpClientChannel` 로 붙어 받은 줄을 미러 CSV 에 적음. 접속 시 31일치 재동기화 | **신규** |
@@ -319,6 +320,13 @@ ArUco PC 한 대가 세트 2개를 도는 구성에서 가장 크게 절약되�
   "maxSimultaneous": 0,
   "calibrationMarkerIds": [96, 97, 98, 99],
 
+  "appear": {
+    "enabled": true, "effect": "grow", "ring": true,
+    "recognizeSeconds": 1.5, "appearSeconds": 1.6,
+    "moveThreshold": 0.6, "settleSeconds": 0.35,
+    "revealSoft": 0.12, "spiralTurns": 2.0
+  },
+
   "sets": [
     {
       "name": "A",
@@ -377,6 +385,8 @@ ArUco PC 한 대가 세트 2개를 도는 구성에서 가장 크게 절약되�
 | 움직임 부드럽게 | `smoothing` | 즉시 |
 | 동시 표시 마커 수 | `maxSimultaneous` | 즉시 |
 | 원근 매핑 / 관람 기록 | `perspectiveMapping` / `recordViews` | 즉시 |
+| 등장 연출 켜기 / 연출 / 빛 고리 | `appear.enabled` / `appear.effect`(드롭다운) / `appear.ring` | 즉시 |
+| 읽는 시간 / 등장 시간 / 멈춤 판정 / 움직임 기준 | `appear.recognizeSeconds` / `appearSeconds` / `settleSeconds` / `moveThreshold` | 즉시 |
 | 이 PC 의 층 | `Setting.json` `floor` | 드롭다운(1~3층). **재시작 후** (고르면 바로 저장하고 안내) |
 | 이 PC 의 역할 | `Setting.json` `role` | 드롭다운(all / aruco / wall). **재시작 후**. 링크 주소(statsHost/Port)는 표시만 |
 
@@ -512,6 +522,55 @@ ArUcoImageCache (StoryRestApp 이 하나만 만들어 모든 세트가 공유)
 재생 경로만 빠르게 확인할 때 쓴다. **전시 중에는 반드시 꺼 둔다**(화면에 경고 문구가 뜬다).
 `F6` 은 실행 중에만 뒤집는 스위치라 파일에 남지 않는다(`ArUcoSet.DebugPreview`) —
 켜 둔 채 다른 값을 저장해도 다음 실행은 `debugPreviewContent` 값으로 시작한다.
+
+### 등장 연출 — 마커를 놓으면 고리가 퍼지고 콘텐츠가 나타난다 (`ArUcoAppear.cs`)
+
+마커가 잡혔다고 곧바로 띄우지 않는다. 사람이 책을 내려놓는 동안 빛이 손을 따라다니면 어수선하고,
+놓기도 전에 읽기가 끝나면 "놓았더니 떴다" 는 느낌이 사라진다. 그래서 마커마다 다음 순서를 따른다
+(`ArUcoAppearTracker`, 설정은 `aruco.json` `appear`):
+
+```
+움직이는 중 ─ 속도 < moveThreshold(0.6 마커/초) 가 settleSeconds(0.35s) 유지 ─▶ 읽는 중
+읽는 중 ─ 마커 자리에서 빛 고리 하나가 recognizeSeconds(1.5s) 에 걸쳐 퍼져 사라짐 ─▶ 뜸
+뜸 ─ appearSeconds(1.6s) 동안 effect 로 등장. 그 뒤엔 마커를 옮겨도 그냥 따라감
+놓침 ─ 연출 없음. holdSeconds(0.3s) 동안 그대로 있다가 꺼진다(추적기의 hold 그대로)
+```
+
+- 읽는 중에 다시 움직이면 무효 — 멈춘 뒤 처음부터 읽는다.
+- 추적기 목록에서 빠진 뒤에도 `viewResumeGraceSeconds` 동안은 상태를 기억한다. 그 안에 돌아오면 같은 관람이므로
+  다시 연출하지 않고 바로 뜬다(영상이 멈춘 자리에서 이어지는 것과 같은 규칙). 읽던 중이었으면 놓은 순간부터 다시.
+- 속도는 `ArUcoMarkerTracker` 의 보간된 중심으로 잰다(마커 한 변 = 1). 마커 크기가 달라도 같은 값을 쓴다.
+- 편집모드에서는 끈다(`ArUcoSet.SuppressAppear`) — 배치를 맞추는 동안 옮길 때마다 기다릴 수는 없다.
+  디버그 격자(F6)에도 없다.
+- 연출 진행은 `_visibleIds`(관람 카운트)와 무관하다. 관람은 검출 기준으로 세고, 연출은 그리기만 바꾼다.
+- 동시 표시 상한(`maxSimultaneous`)은 읽는 중인 마커도 자리로 센다.
+
+`effect` 는 `ArUcoAppearTracker.Apply` 한 함수에 있다. 배치값(scale/offset/globalOffset)·틴트 알파·격자 노드 흔들림·
+알파 마스크만 바꾸고 `ArUcoProjectionView.Draw` 는 그대로 쓴다.
+
+| `effect` | 무엇 | 어떻게 |
+|---|---|---|
+| `grow` (기본) | 마커에서 솟아나옴 | scale·offset 을 0 → 1 로, back-out 이징 |
+| `fade` | 페이드 | 틴트 알파 |
+| `topReveal` | 제자리에서 위에서부터 서서히 | `ArUcoReveal` 셰이더 `_Mode=1`, `_Reveal` 0→1 |
+| `spiral` | 제자리에서 회오리 모양으로 | 셰이더 `_Mode=2`. 나선 팔 + 가운데서 바깥으로 |
+| `wave` | 물결치며 펴짐 | `ArUcoDrawStyle.wave` → `BuildGrid` 가 노드를 세로로 흔든다. 원근이 꺼져 있어도 이때만 격자를 쓴다 |
+| `none` | 연출 없음 | 잡히면(멈춤·읽기 뒤) 바로 |
+
+제자리 드러내기는 `Assets/3.Script/ArUco/Resources/ArUcoReveal.shader` 가 알파를 깎는다. UI/Default 를 줄인 것에
+UV 기준 마스크만 얹었으므로 워프된 상태에서도 콘텐츠 기준 "위" 가 유지된다. AVPro 영상은 `FlipV` 라 `_Flip` 을 같이
+넘긴다. Resources 에 두어 빌드에서 스트립되지 않는다 — 없으면 경고를 찍고 페이드로 대신한다. 판마다 진행도가
+다르므로 머티리얼은 판(풀 인덱스)마다 하나씩 둔다. 빛 고리(`DrawRing`)는 콘텐츠 판보다 앞에 만든 `Rings` 층에 그려
+항상 콘텐츠 뒤에 깔린다. 세트 공통 배율·위치는 고리에 적용하지 않는다 — 고리는 콘텐츠가 아니라 마커를 가리킨다.
+
+### 등장 연출 시연 — `AppearDemo` 씬
+
+카메라 없이 연출을 눈으로 고르는 별도 씬(`Assets/1.Scene/AppearDemo.unity`, `ArUco/Demo/ArUcoAppearDemo.cs`).
+전시와 같은 부품(`ArUcoAppearTracker` + `ArUcoProjectionView`)을 쓰므로 여기서 보이는 것이 곧 전시에서 보이는 것이다.
+가짜 마커 꼭짓점이 카메라가 아니라 마우스에서 올 뿐이다(카메라↔프로젝터 변환은 항등).
+마커를 끌어다 놓으면 전시와 같은 순서로 진행되고 HUD 에 단계가 뜬다. `0`~`5` 연출 고르기, `Space` 처음부터,
+`X` 마커 놓침, `H` 고리, `T` 기울이기, `L` 자동 반복, `P` 일시정지 + `←/→` 0.05초 스크럽.
+인스펙터의 `appear` 값은 `aruco.json` 의 것과 같은 형식이라 맞춰 보고 그대로 옮기면 된다.
 
 ---
 

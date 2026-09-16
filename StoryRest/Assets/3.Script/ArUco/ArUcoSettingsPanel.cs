@@ -145,7 +145,58 @@ namespace StoryRest.ArUco
             ToggleRow(parent, "관람 기록  recordViews",
                 () => config.recordViews, v => config.recordViews = v);
 
+            BuildAppearRows(parent, config);
+
             Note(parent, $"설정 파일: {ArUcoConfigIO.Path}");
+        }
+
+        // 등장 연출(→ ArUcoAppear.cs). 드롭다운 순서 = AppearConfig.EffectNames 순서.
+        static readonly string[] AppearEffectOptions =
+        {
+            "없음 — 잡히면 바로",
+            "마커에서 솟아나옴",
+            "페이드",
+            "위에서부터 서서히",
+            "회오리 모양으로",
+            "물결치며 펴짐",
+        };
+
+        void BuildAppearRows(Transform parent, ArUcoConfig config)
+        {
+            var appear = config.appear;
+
+            Header(parent, "등장 연출 (appear)");
+
+            ToggleRow(parent, "등장 연출 켜기  appear.enabled",
+                () => appear.enabled, v => appear.enabled = v);
+
+            DropdownRow(parent, "연출  appear.effect", AppearEffectOptions,
+                "마커를 놓고 멈추면 고리가 퍼진 뒤 이 방식으로 콘텐츠가 뜬다.",
+                () => (int)appear.Effect,
+                v =>
+                {
+                    appear.SetEffect((AppearEffect)v);
+                    Changed();
+                });
+
+            ToggleRow(parent, "읽는 중 빛 고리  appear.ring",
+                () => appear.ring, v => appear.ring = v);
+
+            FloatRow(parent, "읽는 시간  appear.recognizeSeconds", 0f, 4f, 0.1f, "0.0",
+                () => appear.recognizeSeconds, v => appear.recognizeSeconds = v,
+                "놓은 뒤 콘텐츠가 뜨기까지. 고리 하나가 이 시간에 걸쳐 퍼진다.");
+
+            FloatRow(parent, "등장 시간  appear.appearSeconds", 0.1f, 4f, 0.1f, "0.0",
+                () => appear.appearSeconds, v => appear.appearSeconds = Mathf.Max(0.05f, v),
+                "콘텐츠가 다 나타나기까지.");
+
+            FloatRow(parent, "멈춤 판정  appear.settleSeconds", 0f, 1.5f, 0.05f, "0.00",
+                () => appear.settleSeconds, v => appear.settleSeconds = v,
+                "마커가 이 시간 동안 느리면 놓은 것으로 본다. 움직이는 동안은 읽지 않는다.");
+
+            FloatRow(parent, "움직임 기준  appear.moveThreshold", 0.1f, 3f, 0.1f, "0.0",
+                () => appear.moveThreshold, v => appear.moveThreshold = v,
+                "마커 한 변 길이 / 초. 이보다 빠르면 움직이는 중.");
         }
 
         // 층과 역할은 시작할 때만 읽는다. 고르면 파일에는 바로 쓰되 다음 실행부터 적용된다.

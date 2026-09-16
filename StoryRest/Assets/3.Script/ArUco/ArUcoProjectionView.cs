@@ -38,6 +38,16 @@ namespace StoryRest.ArUco
         TMP_Text _hudText;
 
         readonly List<ArUcoWarpedImage> _pool = new List<ArUcoWarpedImage>();
+
+        // 제자리 드러내기(topReveal/spiral)용 머티리얼. 판마다 진행도가 다르므로 판마다 하나씩 둔다.
+        readonly List<Material> _revealMaterials = new List<Material>();
+        static Shader _revealShader;
+        static bool _revealShaderMissing;
+
+        // 읽는 중 빛 고리. 콘텐츠보다 먼저 만든 층에 두어 항상 콘텐츠 뒤에 깔린다.
+        RectTransform _ringLayer;
+        readonly List<ArUcoWarpedImage> _ringPool = new List<ArUcoWarpedImage>();
+        int _ringUsed;
         readonly List<RawImage> _overlayPool = new List<RawImage>();
         readonly List<TMP_Text> _labelPool = new List<TMP_Text>();
         readonly List<Vector2> _nodes = new List<Vector2>();
@@ -102,6 +112,11 @@ namespace StoryRest.ArUco
             _highlight.color = new Color(1f, 0.85f, 0.2f, 0.35f);
             _highlight.enabled = false;
 
+            var ringLayerGo = new GameObject("Rings", typeof(RectTransform));
+            ringLayerGo.transform.SetParent(_canvasRect, false);
+            _ringLayer = ringLayerGo.GetComponent<RectTransform>();
+            Stretch(_ringLayer);
+
             _statusText = NewText("Status");
             _statusText.enabled = false;
         }
@@ -152,6 +167,7 @@ namespace StoryRest.ArUco
         {
             _used = 0;
             _labelUsed = 0;
+            _ringUsed = 0;
             _highlight.enabled = false;
         }
 
@@ -168,10 +184,90 @@ namespace StoryRest.ArUco
             view.FlipV = style.flipV;
             view.color = style.tint;
             view.SetNodes(_gridDivisions, _gridDivisions, _nodes);
+            ApplyReveal(_used, view, style);
             view.enabled = true;
 
             _used++;
             return true;
+        }
+
+        /// <summary>
+        /// 읽는 중 빛 고리. 마커 자리에서 t(0→1)에 따라 퍼지며 사라진다(→ ArUcoAppearTracker.Ring).
+        /// 세트 공통 배율·위치는 무시한다 — 고리는 콘텐츠가 아니라 마커 자체를 가리키는 표시다.
+        /// </summary>
+        public void DrawRing(ArUcoHomography markerPlane, float t, ArUcoDrawStyle style)
+        {
+            ArUcoAppearTracker.Ring(t, out float scale, out float alpha);
+            if (alpha <= 0.001f) return;
+
+            var ringStyle = ArUcoDrawStyle.Default(1f, Vector2.zero, 4, style.perspective);
+            var placement = ArUcoPlacement.Identity;
+            placement.scale = scale;
+
+            if (!BuildGrid(markerPlane, placement, ringStyle, 0f)) return;
+
+            while (_ringPool.Count <= _ringUsed)
+            {
+                var ring = NewWarpedImage("Ring" + _ringPool.Count);
+                ring.transform.SetParent(_ringLayer, false);
+                _ringPool.Add(ring);
+            }
+
+            var image = _ringPool[_ringUsed];
+            image.SetTexture(ArUcoRingTexture.Get());
+            image.FlipV = false;
+            image.color = new Color(1f, 0.95f, 0.8f, alpha);
+            image.SetNodes(_gridDivisions, _gridDivisions, _nodes);
+            image.enabled = true;
+            _ringUsed++;
+        }
+
+        // 제자리 드러내기는 셰이더가 알파를 깎는다. 그 밖의 판은 기본 UI 머티리얼로 되돌린다.
+        // 셰이더가 없으면(Resources 누락) 알파 페이드로 대신해 화면이 비지는 않게 한다.
+        void ApplyReveal(int index, ArUcoWarpedImage view, ArUcoDrawStyle style)
+        {
+            while (_revealMaterials.Count <= index) _revealMaterials.Add(null);
+
+            if (style.revealMode == RevealMode.None)
+            {
+                if (view.material != view.defaultMaterial) view.material = null;
+                return;
+            }
+
+            if (_revealShader == null && !_revealShaderMissing)
+            {
+                _revealShader = Resources.Load<Shader>("ArUcoReveal");
+                if (_revealShader == null)
+                {
+                    _revealShaderMissing = true;
+                    Debug.LogWarning("[ArUco] Resources/ArUcoReveal 셰이더가 없어 제자리 드러내기 대신 페이드로 그립니다.");
+                }
+            }
+
+            if (_revealShader == null)
+            {
+                var tint = view.color;
+                tint.a *= Mathf.Clamp01(style.reveal);
+                view.color = tint;
+                if (view.material != view.defaultMaterial) view.material = null;
+                return;
+            }
+
+            var material = _revealMaterials[index];
+            if (material == null)
+            {
+                material = new Material(_revealShader) { hideFlags = HideFlags.DontSave };
+                _revealMaterials[index] = material;
+            }
+
+            material.SetFloat("_Mode", (int)style.revealMode);
+            material.SetFloat("_Reveal", style.reveal);
+            material.SetFloat("_Soft", style.revealSoft);
+            material.SetFloat("_Aspect", style.aspect);
+            material.SetFloat("_Turns", style.spiralTurns);
+            material.SetFloat("_Flip", style.flipV ? 1f : 0f);
+
+            if (view.material != material) view.material = material;
         }
 
         /// <summary>편집 중인 마커에 조금 더 큰 판을 깔아 어느 것을 조정 중인지 보이게 한다.</summary>
@@ -187,6 +283,7 @@ namespace StoryRest.ArUco
         {
             for (int i = _used; i < _pool.Count; i++) _pool[i].enabled = false;
             for (int i = _labelUsed; i < _labelPool.Count; i++) _labelPool[i].enabled = false;
+            for (int i = _ringUsed; i < _ringPool.Count; i++) _ringPool[i].enabled = false;
         }
 
         /// <summary>
@@ -393,8 +490,8 @@ namespace StoryRest.ArUco
             float halfWidth = 0.5f * style.globalScale * placement.scale + margin;
             float halfHeight = halfWidth * style.aspect + margin;
 
-            // 원근이 없으면 사각형 한 장으로도 정확하다. 쪼갤 이유가 없다.
-            _gridDivisions = style.perspective ? Mathf.Clamp(style.subdivisions, 1, 32) : 1;
+            // 원근이 없으면 사각형 한 장으로도 정확하다. 쪼갤 이유가 없다 — 물결 연출만은 격자가 있어야 보인다.
+            _gridDivisions = style.perspective || style.wave > 0f ? Mathf.Clamp(style.subdivisions, 1, 32) : 1;
 
             float rad = placement.rotationOffset * Mathf.Deg2Rad;
             float cos = Mathf.Cos(rad);
@@ -404,13 +501,19 @@ namespace StoryRest.ArUco
 
             _nodes.Clear();
 
+            // 물결 연출(→ ArUcoAppearTracker.Apply, Wave). 평면 위에서 노드를 세로로 흔든다.
+            float wave = style.wave > 0f ? style.wave * halfHeight * 2f : 0f;
+            float wavePhase = Time.unscaledTime * 14f;
+
             for (int y = 0; y <= _gridDivisions; y++)
             {
                 float py = Mathf.Lerp(-halfHeight, halfHeight, (float)y / _gridDivisions);
 
                 for (int x = 0; x <= _gridDivisions; x++)
                 {
-                    float px = Mathf.Lerp(-halfWidth, halfWidth, (float)x / _gridDivisions);
+                    float fx = (float)x / _gridDivisions;
+                    float px = Mathf.Lerp(-halfWidth, halfWidth, fx);
+                    float wy = wave > 0f ? py + Mathf.Sin(fx * Mathf.PI * 3f - wavePhase) * wave : py;
 
                     // 마커 평면 안에서 회전·이동시킨다. 평면 위에서 처리하므로
                     // 책자를 어떻게 돌리고 눕혀도 콘텐츠는 페이지의 같은 자리에 머문다.
@@ -418,8 +521,8 @@ namespace StoryRest.ArUco
                     // 세트 공통 위치는 개별 회전 뒤에 더한다. 마커별 offset 과 같은 좌표계에 있어야
                     // "전체를 밀어 둔 자리에서 이 마커만 조금 더" 가 예상대로 동작한다.
                     // 파일별 offset 도 같은 이유로 마커 offset 에 그냥 더해 둔 상태로 들어온다.
-                    float rx = px * cos - py * sin + placement.offsetX + style.globalOffset.x;
-                    float ry = px * sin + py * cos + placement.offsetY + style.globalOffset.y;
+                    float rx = px * cos - wy * sin + placement.offsetX + style.globalOffset.x;
+                    float ry = px * sin + wy * cos + placement.offsetY + style.globalOffset.y;
 
                     // 마커 중심이 (0.5, 0.5), 한 변이 1. v 는 아래로 증가하므로 y 부호를 뒤집는다.
                     if (!plane.TryMap(new Vector2(0.5f + rx, 0.5f - ry), out Vector2 cameraPixel))
@@ -511,6 +614,16 @@ namespace StoryRest.ArUco
         public int subdivisions;
         public bool perspective;
 
+        // ---- 등장 연출(→ ArUcoAppearTracker.Apply) ----
+        // 격자 노드를 세로로 흔드는 진폭(콘텐츠 높이 = 1). 0 이면 흔들지 않는다.
+        public float wave;
+
+        // 제자리 드러내기. None 이 아니면 ArUcoReveal 셰이더가 reveal(0→1)만큼만 보이게 한다.
+        public RevealMode revealMode;
+        public float reveal;
+        public float revealSoft;
+        public float spiralTurns;
+
         public static ArUcoDrawStyle Default(float globalScale, Vector2 globalOffset,
                                              int subdivisions, bool perspective)
         {
@@ -524,6 +637,11 @@ namespace StoryRest.ArUco
                 globalOffset = globalOffset,
                 subdivisions = subdivisions,
                 perspective = perspective,
+                wave = 0f,
+                revealMode = RevealMode.None,
+                reveal = 1f,
+                revealSoft = 0.12f,
+                spiralTurns = 2f,
             };
         }
     }

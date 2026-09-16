@@ -373,6 +373,10 @@ namespace StoryRest.ArUco
         // 관람을 파일로 남길지. persistentDataPath/stats/ 에 날짜별 CSV 로 쌓인다.
         public bool recordViews = true;
 
+        // ---- 등장 연출 (→ ArUcoAppear.cs, ARCHITECTURE §5 등장 연출) ----
+        // 마커를 놓고 멈추면 빛 고리가 퍼진 뒤 콘텐츠가 나타난다. 놓칠 때는 연출 없이 holdSeconds 뒤 꺼진다.
+        public AppearConfig appear = new AppearConfig();
+
         // 메모리에 올려 둘 이미지 수. 세트끼리 함께 쓰는 캐시라 층 전체 기준이다.
         //
         // 이미지는 영상과 달리 디코딩 부하가 없어 상한이 화면 성능이 아니라 메모리에 걸린다.
@@ -482,6 +486,8 @@ namespace StoryRest.ArUco
             // hold 안에 돌아오는 것은 놓친 적도 없는 것이다. grace 가 그보다 짧으면 의미가 없다.
             viewResumeGraceSeconds = Mathf.Max(holdSeconds, viewResumeGraceSeconds);
             manualTargetSize = Mathf.Clamp(manualTargetSize, MinManualTargetSize, MaxManualTargetSize);
+            appear ??= new AppearConfig();
+            appear.Validate();
 
             for (int i = 0; i < sets.Count; i++)
             {

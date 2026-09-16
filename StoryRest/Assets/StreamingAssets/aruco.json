@@ -17,6 +17,17 @@
     "manualTargetSize": 0.10800004750490189,
     "editorPreview": false,
     "debugPreviewContent": false,
+    "appear": {
+        "enabled": true,
+        "effect": "grow",
+        "ring": true,
+        "recognizeSeconds": 1.5,
+        "appearSeconds": 1.6,
+        "moveThreshold": 0.6,
+        "settleSeconds": 0.35,
+        "revealSoft": 0.12,
+        "spiralTurns": 2.0
+    },
     "adjustPositionStep": 0.019999999552965165,
     "adjustScaleStep": 0.019999999552965165,
     "adjustRotationStep": 1.0,

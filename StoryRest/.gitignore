@@ -96,3 +96,7 @@ crashlytics-build.properties
 # Unity 가 그것을 지우고, 클론할 때마다 폴더 GUID 가 새로 바뀐다.
 /[Aa]ssets/[Ss]treamingAssets/floor_*/*/*
 !/[Aa]ssets/[Ss]treamingAssets/floor_*/*/.gitkeep
+
+# ArUcoConfigIO 가 저장할 때마다 남기는 직전 설정 백업
+/Assets/StreamingAssets/*.bak
+/Assets/StreamingAssets/*.bak.meta
