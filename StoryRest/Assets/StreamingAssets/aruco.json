@@ -1,5 +1,5 @@
 {
-    "dictionaryId": 1,
+    "dictionaryId": 2,
     "smoothing": 0.4000000059604645,
     "holdSeconds": 0.30000001192092898,
     "warpSubdivisions": 10,
@@ -9,10 +9,10 @@
     "maxConcurrentVideos": 4,
     "maxCachedImages": 24,
     "calibrationMarkerIds": [
-        96,
-        97,
-        98,
-        99
+        107,
+        108,
+        109,
+        110
     ],
     "manualTargetSize": 0.10800004750490189,
     "editorPreview": false,

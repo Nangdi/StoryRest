@@ -10,6 +10,17 @@
     "maxOnScreen": 16,
     "minFontSize": 44.0,
     "maxFontSize": 132.0,
+    "minSpriteSize": 360.0,
+    "maxSpriteSize": 760.0,
+    "minSpriteFolders": 5,
+    "maxSpriteFolders": 10,
+    "spriteGradients": [
+        { "from": "#B04A8C", "to": "#8C8C99" },
+        { "from": "#4A8CB0", "to": "#99A6B8" },
+        { "from": "#C08A3A", "to": "#B0A48C" },
+        { "from": "#4AB08C", "to": "#8CA699" }
+    ],
+    "spriteGradientAngle": 0.0,
     "minSpeed": 0.012000000104308129,
     "maxSpeed": 0.054999999701976779,
     "minAlpha": 0.30000001192092898,
@@ -40,5 +51,21 @@
     "avoidDuplicates": true,
     "separation": 0.5,
     "separationPadding": 1.149999976158142,
-    "edgeMargin": 0.029999999329447748
+    "edgeMargin": 0.029999999329447748,
+    "spotlight": {
+        "enabled": true,
+        "intervalSeconds": 60.0,
+        "cardSeconds": 12.0,
+        "fadeSeconds": 0.8,
+        "showTopicName": false,
+        "refreshSeconds": 60.0,
+        "margin": 56.0,
+        "width": 560.0,
+        "imageSize": 360.0,
+        "recommendLabel": "오늘의 추천",
+        "todayLabel": "오늘의 인기 주제",
+        "weekLabel": "이번 주 인기 주제",
+        "monthLabel": "이달의 인기 주제",
+        "accentColor": "#8FE3FF"
+    }
 }

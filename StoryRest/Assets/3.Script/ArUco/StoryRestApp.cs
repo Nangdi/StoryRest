@@ -46,6 +46,12 @@ namespace StoryRest.ArUco
 
         public KeywordWallConfig KeywordConfig { get; private set; }
 
+        /// <summary>월의 그림 텍스처(떠다니는 스프라이트 + 주제 카드 그림). 월이 있을 때만 만들어지고 월 화면들이 함께 쓴다.</summary>
+        public KeywordSpriteCache Sprites { get; private set; }
+
+        /// <summary>월 왼쪽 위 주제 카드의 재료(추천 · 인기 순위). 월 화면들이 함께 본다.</summary>
+        public KeywordSpotlight Spotlight { get; private set; }
+
         /// <summary>관람 기록 링크. aruco 역할이면 서버, wall 역할이면 클라이언트, all 이면 둘 다 null.</summary>
         public ViewStatsServer StatsServer { get; private set; }
         public ViewStatsClient StatsClient { get; private set; }
@@ -189,8 +195,34 @@ namespace StoryRest.ArUco
             var walls = ActiveWalls();
             if (walls.Count == 0) return;
 
-            // 낱말 목록은 층 폴더에서 읽는다. 화면끼리 같은 목록을 공유한다.
-            var words = KeywordList.Load(Settings.ContentRoot);
+            // 무엇이 떠다니는지는 층 폴더가 정한다(→ SPEC §3.1). <마커ID>/sprite/ 에 그림이 하나라도 있으면
+            // 그 층은 스프라이트, 없으면 keywords.txt 의 낱말. 화면끼리 같은 목록을 공유한다.
+            var spriteFolders = ArUcoContentIndex.ScanSprites(Settings.ContentRoot);
+            bool useSprites = spriteFolders.Count > 0;
+            List<string> entries;
+
+            // 여유분은 한 화면 분량 — 방금 사라진 그림이 곧 다시 나올 때 다시 읽지 않을 만큼이면 된다.
+            // 낱말 모드여도 주제 카드가 그림을 쓰므로 월이 있으면 늘 만든다.
+            Sprites = new KeywordSpriteCache(this, KeywordConfig.maxOnScreen);
+
+            if (useSprites)
+            {
+                // 폴더가 100개면 전부 띄우기엔 너무 많다. 설정 범위만큼 폴더를 무작위로 골라 그 그림만 띄운다.
+                var picked = new List<SpriteFolder>();
+                entries = KeywordConfig.PickSprites(spriteFolders, picked);
+
+                Debug.Log($"[Keyword] 그림이 있는 폴더 {spriteFolders.Count}개 중 {picked.Count}개를 골라 " +
+                          $"그림 {entries.Count}장을 띄웁니다(낱말 대신). " +
+                          $"고른 폴더: [{string.Join(", ", picked.ConvertAll(f => f.folderName))}]  " +
+                          $"(keywordwall.json 의 minSpriteFolders~maxSpriteFolders)");
+            }
+            else
+            {
+                entries = KeywordList.Load(Settings.ContentRoot);
+            }
+
+            if (KeywordConfig.spotlight.enabled)
+                Spotlight = new KeywordSpotlight(KeywordConfig.spotlight, Settings.ContentRoot);
 
             for (int i = 0; i < walls.Count; i++)
             {
@@ -198,12 +230,14 @@ namespace StoryRest.ArUco
                 go.transform.SetParent(transform, false);
 
                 var wall = go.AddComponent<KeywordWall>();
-                wall.Setup(KeywordConfig, words, walls[i].displayIndex, i);
+                wall.Setup(KeywordConfig, entries, useSprites ? Sprites : null, walls[i].displayIndex, i);
+                if (Spotlight != null) wall.AttachSpotlight(Spotlight, Sprites);
                 _walls.Add(wall);
             }
 
             Debug.Log($"[Keyword] {Settings.floor}층 키워드 월 {_walls.Count}개 " +
-                      $"(디스플레이 {string.Join(", ", walls.ConvertAll(w => w.displayIndex))})");
+                      $"({(useSprites ? "스프라이트" : "낱말")} {entries.Count}개 · " +
+                      $"디스플레이 {string.Join(", ", walls.ConvertAll(w => w.displayIndex))})");
         }
 
         /// <summary>
@@ -250,14 +284,22 @@ namespace StoryRest.ArUco
             if (GetComponent<ArUcoStatsPanel>() == null) gameObject.AddComponent<ArUcoStatsPanel>();
         }
 
+        void Update()
+        {
+            // 카드 재료는 월 화면 수와 무관하게 한 번만 센다.
+            Spotlight?.Tick();
+        }
+
         void OnDestroy()
         {
+            Spotlight?.Dispose();
+            Sprites?.ReleaseAll();
             if (Instance == this) Instance = null;
         }
 
         /// <summary>
         /// 캘리브레이션용 마커가 실제로 만들 수 있는 ID 인지 확인한다.
-        /// 딕셔너리마다 가진 개수가 다르다 — DICT_4X4_100 은 0~99 뿐이다.
+        /// 딕셔너리마다 가진 개수가 다르다 — DICT_4X4_100 은 0~99 뿐이고 DICT_4X4_250 은 0~249 다.
         /// 여기서 걸러내지 않으면 설치 현장에서 보정을 시도할 때에야 알게 된다.
         /// </summary>
         void ValidateCalibrationMarkers()

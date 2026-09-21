@@ -6,10 +6,13 @@ using UnityEngine.UI;
 namespace StoryRest.Keyword
 {
     /// <summary>
-    /// 벽면에 과학 낱말이 떠다니는 화면. 프로젝터 한 대를 담당한다.
+    /// 벽면에 과학 낱말(또는 스프라이트 그림)이 떠다니는 화면. 프로젝터 한 대를 담당한다.
     ///
     /// 관람객 인터랙션이 없는 배경 화면이라 계속 돌아간다.
-    /// 낱말마다 다른 움직임·크기·투명도를 주어 같은 패턴이 반복되어 보이지 않게 한다.
+    /// 항목마다 다른 움직임·크기·투명도를 주어 같은 패턴이 반복되어 보이지 않게 한다.
+    ///
+    /// 낱말과 스프라이트는 "무엇을 그리는가" 만 다르다. 항목 하나가 TMP_Text 나 RawImage 중 하나를 갖고,
+    /// 움직임·겹침·페이드는 같은 코드를 탄다. 어느 쪽인지는 Setup 에 스프라이트 캐시가 왔는지로 정해진다.
     ///
     /// 좌표는 화면을 0~1 로 보는 정규화 값이다. 해상도가 다른 프로젝터를 물려도 같은 그림이 나온다.
     /// </summary>
@@ -19,18 +22,25 @@ namespace StoryRest.Keyword
         // ArUco 세트 카메라와 겹치지 않도록 반대 방향으로 떨어뜨린다.
         const float WallSeparation = -10000f;
 
-        // 글자 크기(픽셀)와 개수는 이 해상도를 기준으로 정한 값이다. 실제 화면이 다르면 통째로 배율을 맞춘다.
+        // 글자·그림 크기(픽셀)와 개수는 이 해상도를 기준으로 정한 값이다. 실제 화면이 다르면 통째로 배율을 맞춘다.
         // 두 프로젝터 해상도가 달라도(또는 창이 작아도) 같은 그림이 나오게 하기 위해서다 — 픽셀 그대로 두면
         // 작은 화면에서는 같은 낱말 16개가 들어갈 자리가 없어 서로 밀어내며 겹치고 떨린다.
-        static readonly Vector2 ReferenceResolution = new Vector2(1920f, 1080f);
+        // 월 프로젝터는 16:10 이다(→ SPEC §3.1). 에디터에서 볼 때는 Game 뷰 비율도 16:10 으로 맞춘다.
+        static readonly Vector2 ReferenceResolution = new Vector2(1920f, 1200f);
 
         class Item
         {
-            public TMP_Text label;
+            public TMP_Text label;             // 낱말 모드
+            public KeywordGradientImage image; // 스프라이트 모드
+            public Graphic graphic;       // 둘 중 실제로 붙은 것. 색·투명도는 이것으로 만진다
             public RectTransform rect;
 
             public KeywordMotion motion;
-            public string word;
+            public string word;           // 낱말, 또는 스프라이트 파일 경로
+
+            // 스프라이트 텍스처가 아직 오지 않았다. 올 때까지 이미지를 꺼 둔다(켜 두면 흰 사각형이 뜬다).
+            public bool awaitingTexture;
+            public float spriteSize;      // 이 항목에 배정된 긴 변 크기(기준 해상도 픽셀)
 
             public Vector2 position;      // 화면 정규화 좌표
             public Vector2 velocity;      // 초당 이동량(정규화)
@@ -54,6 +64,18 @@ namespace StoryRest.Keyword
         List<string> _words;
         List<KeywordMotion> _motions;
         List<Color> _colors;
+        List<(Color from, Color to)> _gradients;   // 비어 있으면 스프라이트를 원본 색 그대로
+
+        // null 이면 낱말 모드. 있으면 _words 가 스프라이트 파일 경로 목록이다.
+        KeywordSpriteCache _sprites;
+
+        // 왼쪽 위 주제 카드. 없을 수 있다(설정에서 끔).
+        KeywordSpotlightView _spotlight;
+
+        // 카드가 차지하는 자리(화면 0~1). 카드가 떠 있을 때만 _reserved 에 들어가고, 없을 때는 낱말들이 화면 전체를 쓴다.
+        Rect _cardArea;
+        Rect _reserved;
+        bool _reservedActive;
 
         Camera _camera;
         RectTransform _canvasRect;
@@ -63,18 +85,25 @@ namespace StoryRest.Keyword
 
         int _wordCursor;
 
-        public void Setup(KeywordWallConfig config, List<string> words, int displayIndex, int wallIndex)
+        /// <param name="entries">떠다닐 것들. 낱말 모드면 낱말, 스프라이트 모드면 그림 파일의 절대 경로.</param>
+        /// <param name="sprites">스프라이트 모드일 때 텍스처를 빌려 줄 캐시. 낱말 모드면 null.</param>
+        public void Setup(KeywordWallConfig config, List<string> entries, KeywordSpriteCache sprites,
+                          int displayIndex, int wallIndex)
         {
             _config = config;
-            _words = words;
+            _words = entries;
+            _sprites = sprites;
             _motions = config.ResolveMotions();
             _colors = config.ResolveColors();
+            _gradients = config.ResolveSpriteGradients();
 
             BuildScreen(displayIndex, wallIndex);
 
             if (_words == null || _words.Count == 0)
             {
-                Debug.LogWarning("[Keyword] 낱말이 없어 빈 화면으로 둡니다. floor_<N>/keywords.txt 를 확인하세요.");
+                Debug.LogWarning(_sprites != null
+                    ? "[Keyword] 스프라이트가 없어 빈 화면으로 둡니다. floor_<N>/<마커ID>/sprite/ 를 확인하세요."
+                    : "[Keyword] 낱말이 없어 빈 화면으로 둡니다. floor_<N>/keywords.txt 를 확인하세요.");
                 return;
             }
 
@@ -88,6 +117,49 @@ namespace StoryRest.Keyword
                 _items.Add(item);
                 Respawn(item);
                 item.age = Random.Range(0f, item.lifetime * 0.8f);
+            }
+        }
+
+        /// <summary>
+        /// 왼쪽 위에 주제 카드를 붙인다. Setup 뒤에 부른다.
+        /// 카드는 낱말들보다 나중에 만들어져 위에 그려진다. 자리 비우기는 카드가 뜰 때 UpdateReserved 가 한다.
+        /// </summary>
+        public void AttachSpotlight(KeywordSpotlight model, KeywordSpriteCache cache)
+        {
+            if (_canvasRect == null || model == null) return;
+
+            // 첫 장도 그 자리의 낱말이 먼저 사라진 뒤에 뜨도록 낱말 페이드 시간만큼 늦춘다.
+            _spotlight = new KeywordSpotlightView(_config.spotlight, _config, model, cache, _config.fadeSeconds + 0.5f);
+            _spotlight.Build(_canvasRect);
+            _cardArea = _spotlight.ReservedArea(_canvasRect.rect.size);
+        }
+
+        /// <summary>
+        /// 카드가 뜨는 동안만 그 자리를 비운다. 평소에는 낱말들이 화면 전체를 쓴다 — 한 구석을 늘 비워 두면 허전하다.
+        ///
+        /// 카드가 뜨기 fadeSeconds 전에 미리 자리를 잡아, 그 안에 있던 것들은 카드보다 먼저 사라지게 한다.
+        /// 사라진 것은 다른 자리에서 다시 태어난다(FindOpenSpot 이 카드 자리를 뺀다). 카드가 떠 있는 동안 다가오는 것은
+        /// KeepOutOfReserved 가 튕겨낸다. 카드가 사라지면 자리도 풀린다.
+        /// </summary>
+        void UpdateReserved()
+        {
+            if (_spotlight == null) return;
+
+            bool active = _spotlight.IsShowing || _spotlight.SecondsUntilShow <= _config.fadeSeconds;
+            if (active == _reservedActive) return;
+
+            _reservedActive = active;
+            _reserved = active ? _cardArea : Rect.zero;
+            if (!active) return;
+
+            for (int i = 0; i < _items.Count; i++)
+            {
+                var item = _items[i];
+                if (!Overlaps(item, _reserved)) continue;
+
+                // 지금 밝기에서 이어서 사라지게 수명을 당긴다. 아직 나타나는 중이면 그 밝기 그대로 되돌아간다 —
+                // 수명만 줄이면 밝기가 1 로 튀었다가 꺼진다.
+                item.lifetime = item.age + Mathf.Min(item.age, _config.fadeSeconds);
             }
         }
 
@@ -133,23 +205,46 @@ namespace StoryRest.Keyword
             var go = new GameObject($"Keyword{index}", typeof(RectTransform));
             go.transform.SetParent(_canvasRect, false);
 
-            var label = go.AddComponent<TextMeshProUGUI>();
-            label.raycastTarget = false;
-            label.alignment = TextAlignmentOptions.Center;
-            label.enableWordWrapping = false;
+            var item = new Item();
 
-            var rect = label.rectTransform;
-            rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0.5f, 0.5f);
+            if (_sprites != null)
+            {
+                var image = go.AddComponent<KeywordGradientImage>();
+                image.raycastTarget = false;
+                image.enabled = false;   // 텍스처가 올 때까지
 
-            return new Item { label = label, rect = rect };
+                item.image = image;
+                item.graphic = image;
+                item.rect = image.rectTransform;
+            }
+            else
+            {
+                var label = go.AddComponent<TextMeshProUGUI>();
+                label.raycastTarget = false;
+                label.alignment = TextAlignmentOptions.Center;
+                label.enableWordWrapping = false;
+
+                item.label = label;
+                item.graphic = label;
+                item.rect = label.rectTransform;
+            }
+
+            item.rect.anchorMin = item.rect.anchorMax = item.rect.pivot = new Vector2(0.5f, 0.5f);
+            return item;
         }
 
         void Update()
         {
-            if (_items.Count == 0 || _canvasRect == null) return;
+            if (_canvasRect == null) return;
 
             // 배경 화면이라 게임 시간 흐름(GameManager 의 timeScale)에 영향받지 않아야 한다.
             float dt = Time.unscaledDeltaTime;
+
+            // 카드는 낱말이 하나도 없어도 돈다.
+            _spotlight?.Tick(dt);
+            UpdateReserved();
+
+            if (_items.Count == 0) return;
             Vector2 canvasSize = _canvasRect.rect.size;
             if (canvasSize.x <= 0f || canvasSize.y <= 0f) return;
 
@@ -164,6 +259,8 @@ namespace StoryRest.Keyword
                     continue;
                 }
 
+                if (item.awaitingTexture) PollTexture(item);
+
                 Move(item, dt);
             }
 
@@ -172,6 +269,38 @@ namespace StoryRest.Keyword
             Separate(dt);
 
             for (int i = 0; i < _items.Count; i++) Apply(_items[i], canvasSize);
+        }
+
+        /// <summary>항목의 글자 상자가 사각형(화면 0~1)에 걸치는가.</summary>
+        static bool Overlaps(Item item, Rect area)
+        {
+            if (area.width <= 0f || area.height <= 0f) return false;
+
+            return item.position.x - item.halfSize.x < area.xMax
+                && item.position.x + item.halfSize.x > area.xMin
+                && item.position.y - item.halfSize.y < area.yMax
+                && item.position.y + item.halfSize.y > area.yMin;
+        }
+
+        /// <summary>
+        /// 카드 자리에 들어온 항목을 가까운 변으로 밀어낸다. 낱말끼리 밀어내는 것과 같은 세기로 서서히.
+        /// 카드가 왼쪽 위 모서리에 있으므로 실제로는 오른쪽 아니면 아래로 나간다.
+        /// </summary>
+        void KeepOutOfReserved(Item item, float dt)
+        {
+            if (!Overlaps(item, _reserved)) return;
+
+            float pushRight = _reserved.xMax - (item.position.x - item.halfSize.x);
+            float pushDown = _reserved.yMax - (item.position.y - item.halfSize.y);
+            float push = Mathf.Max(_config.separation, 0.2f) * dt;
+
+            Vector2 direction = pushRight < pushDown ? Vector2.right : Vector2.up;   // y 는 아래로 증가
+            item.position += direction * push;
+            item.center += direction * push;
+
+            // 직선으로 오는 것은 방향도 꺾어 준다. 안 그러면 매 프레임 밀어내는 것과 들어오려는 것이 맞서 떨린다.
+            if (direction.x > 0f && item.velocity.x < 0f) item.velocity.x = -item.velocity.x;
+            if (direction.y > 0f && item.velocity.y < 0f) item.velocity.y = -item.velocity.y;
         }
 
         /// <summary>
@@ -183,11 +312,10 @@ namespace StoryRest.Keyword
         void Separate(float dt)
         {
             float strength = _config.separation;
-            if (strength <= 0f) return;
-
             float padding = _config.separationPadding;
 
-            for (int i = 0; i < _items.Count; i++)
+            // strength 0 이면 서로 밀어내지 않는다. 카드 자리 비켜 가기와 화면 안 가두기는 그래도 한다.
+            for (int i = 0; strength > 0f && i < _items.Count; i++)
             {
                 var a = _items[i];
 
@@ -222,7 +350,11 @@ namespace StoryRest.Keyword
                 }
             }
 
-            for (int i = 0; i < _items.Count; i++) ClampInside(_items[i]);
+            for (int i = 0; i < _items.Count; i++)
+            {
+                KeepOutOfReserved(_items[i], dt);
+                ClampInside(_items[i]);
+            }
         }
 
         void ClampInside(Item item)
@@ -329,9 +461,9 @@ namespace StoryRest.Keyword
 
             float alpha = item.baseAlpha * FadeFactor(item);
 
-            var color = item.label.color;
+            var color = item.graphic.color;
             color.a = alpha;
-            item.label.color = color;
+            item.graphic.color = color;
         }
 
         // 등장과 퇴장을 부드럽게. 갑자기 나타나면 배경이 아니라 알림처럼 보인다.
@@ -350,31 +482,56 @@ namespace StoryRest.Keyword
 
         void Respawn(Item item)
         {
-            if (!string.IsNullOrEmpty(item.word)) _onScreen.Remove(item.word);
+            if (!string.IsNullOrEmpty(item.word))
+            {
+                _onScreen.Remove(item.word);
+                _sprites?.Release(item.word);
+            }
 
             item.word = NextWord();
             item.motion = _motions[Random.Range(0, _motions.Count)];
-
-            float fontSize = Random.Range(_config.minFontSize, _config.maxFontSize);
-            item.label.text = item.word;
-            item.label.fontSize = fontSize;
-
-            var color = _colors[Random.Range(0, _colors.Count)];
             item.baseAlpha = Random.Range(_config.minAlpha, _config.maxAlpha);
-            color.a = 0f;   // 첫 프레임부터 서서히 나타나게
-            item.label.color = color;
 
-            // 글자가 차지하는 크기를 알아야 화면 밖으로 나가는 것을 막을 수 있다.
-            Vector2 preferred = item.label.GetPreferredValues();
-            item.rect.sizeDelta = preferred;
+            Vector2 size;
 
-            Vector2 canvasSize = _canvasRect.rect.size;
-            item.halfSize = canvasSize.x > 0f && canvasSize.y > 0f
-                ? new Vector2(preferred.x * 0.5f / canvasSize.x, preferred.y * 0.5f / canvasSize.y)
-                : new Vector2(0.05f, 0.03f);
+            if (_sprites != null)
+            {
+                // 그림은 원본 색 그대로 띄운다(투명도만 다르게). 그라데이션이 설정되어 있으면 그중 하나를 곱한다.
+                item.graphic.color = new Color(1f, 1f, 1f, 0f);   // 첫 프레임부터 서서히 나타나게
+                item.spriteSize = Random.Range(_config.minSpriteSize, _config.maxSpriteSize);
 
-            // 글자가 화면보다 크면 경계 계산이 뒤집힌다. 여유를 남겨 둔다.
-            item.halfSize = Vector2.Min(item.halfSize, new Vector2(0.45f, 0.45f));
+                if (_gradients.Count > 0)
+                {
+                    var gradient = _gradients[Random.Range(0, _gradients.Count)];
+                    item.image.SetGradient(gradient.from, gradient.to, _config.spriteGradientAngle);
+                }
+                else item.image.ClearGradient();
+
+                // 텍스처는 비동기로 온다. 올 때까지는 정사각형으로 자리를 잡아 두고, 도착하면 종횡비에 맞춘다.
+                _sprites.Acquire(item.word);
+                item.image.enabled = false;
+                item.image.texture = null;
+                item.awaitingTexture = true;
+
+                size = new Vector2(item.spriteSize, item.spriteSize);
+            }
+            else
+            {
+                item.label.text = item.word;
+                item.label.fontSize = Random.Range(_config.minFontSize, _config.maxFontSize);
+
+                var color = _colors[Random.Range(0, _colors.Count)];
+                color.a = 0f;   // 첫 프레임부터 서서히 나타나게
+                item.label.color = color;
+
+                // 글자가 차지하는 크기를 알아야 화면 밖으로 나가는 것을 막을 수 있다.
+                size = item.label.GetPreferredValues();
+            }
+
+            SetSize(item, size);
+
+            // 이미 캐시에 있는 그림이면 바로 실제 크기로 잡힌다. 그래야 자리 선택이 진짜 크기로 된다.
+            if (item.awaitingTexture) PollTexture(item);
 
             item.age = 0f;
             item.lifetime = Random.Range(_config.minLifetime, _config.maxLifetime);
@@ -420,6 +577,44 @@ namespace StoryRest.Keyword
         }
 
         /// <summary>
+        /// 항목이 차지하는 크기(기준 해상도 픽셀)를 정하고, 화면 밖으로 나가지 않게 정규화한 반크기를 계산한다.
+        /// </summary>
+        void SetSize(Item item, Vector2 size)
+        {
+            item.rect.sizeDelta = size;
+
+            Vector2 canvasSize = _canvasRect.rect.size;
+            item.halfSize = canvasSize.x > 0f && canvasSize.y > 0f
+                ? new Vector2(size.x * 0.5f / canvasSize.x, size.y * 0.5f / canvasSize.y)
+                : new Vector2(0.05f, 0.03f);
+
+            // 화면보다 크면 경계 계산이 뒤집힌다. 여유를 남겨 둔다.
+            item.halfSize = Vector2.Min(item.halfSize, new Vector2(0.45f, 0.45f));
+        }
+
+        /// <summary>
+        /// 스프라이트 텍스처가 도착했는지 본다. 왔으면 그림을 켜고 종횡비에 맞춰 크기를 다시 잡는다.
+        /// 읽기에 실패한 파일은 남은 수명 동안 빈 자리로 두고 다음 차례에 다른 그림으로 넘어간다 — 매 프레임 재시도하지 않는다.
+        /// </summary>
+        void PollTexture(Item item)
+        {
+            if (!_sprites.TryGet(item.word, out var texture, out bool failed))
+            {
+                if (failed) item.awaitingTexture = false;
+                return;
+            }
+
+            item.awaitingTexture = false;
+            item.image.texture = texture;
+            item.image.enabled = true;
+
+            // 긴 변을 배정된 크기에 맞추고 짧은 변은 원본 비율을 따른다.
+            float longest = Mathf.Max(texture.width, texture.height, 1);
+            float scale = item.spriteSize / longest;
+            SetSize(item, new Vector2(texture.width * scale, texture.height * scale));
+        }
+
+        /// <summary>
         /// 이미 떠 있는 낱말들과 가장 덜 붙는 자리를 고른다.
         /// 무작위로만 놓으면 태어나자마자 남의 글자 위에 겹쳐 읽을 수 없게 된다.
         /// </summary>
@@ -435,6 +630,11 @@ namespace StoryRest.Keyword
                 var candidate = new Vector2(
                     Random.Range(limit.x, 1f - limit.x),
                     Random.Range(limit.y, 1f - limit.y));
+
+                // 카드 자리는 후보에서 뺀다. 마지막 시도까지 못 피했으면 아래에서 밀려 나간다.
+                if (_reserved.width > 0f && attempt < 11
+                    && candidate.x - self.halfSize.x < _reserved.xMax && candidate.y - self.halfSize.y < _reserved.yMax)
+                    continue;
 
                 float clearance = float.MaxValue;
 
@@ -475,7 +675,7 @@ namespace StoryRest.Keyword
         }
 
         /// <summary>
-        /// 목록을 순서대로 돌면서 낱말을 고른다. 매번 무작위로 뽑으면 어떤 낱말은 계속 안 나온다.
+        /// 목록을 순서대로 돌면서 낱말(또는 스프라이트)을 고른다. 매번 무작위로 뽑으면 어떤 것은 계속 안 나온다.
         /// </summary>
         string NextWord()
         {
