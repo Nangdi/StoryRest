@@ -13,6 +13,9 @@ public class SettingsPanelUI : MonoBehaviour
     [Tooltip("시작할 때 설정창을 숨긴 상태로 둘지 여부.")]
     [SerializeField] private bool hideOnStart = true;
 
+    [Tooltip("코드가 줄을 덧붙일 자리(ArUcoSettingsPanel). 스크롤의 Content 를 두면 줄이 많아도 화면을 넘지 않는다. 비우면 panelRoot.")]
+    [SerializeField] private RectTransform rowsRoot;
+
     [Header("설정 토글")]
     [SerializeField] private Toggle useUnityOnTopToggle;
     [SerializeField] private Toggle showMouseCursorToggle;
@@ -23,8 +26,11 @@ public class SettingsPanelUI : MonoBehaviour
     // 데이터 -> UI 반영 중에는 onValueChanged 콜백이 저장을 유발하지 않도록 막는다.
     private bool _syncing;
 
-    /// <summary>다른 스크립트가 줄을 덧붙일 수 있게 패널 루트를 연다(ArUcoSettingsPanel).</summary>
+    /// <summary>ESC 로 켜고 끄는 창 전체.</summary>
     public GameObject PanelRoot => panelRoot;
+
+    /// <summary>다른 스크립트가 줄을 덧붙일 자리(ArUcoSettingsPanel). 스크롤 안의 Content 다.</summary>
+    public Transform RowsRoot => rowsRoot != null ? rowsRoot : (panelRoot != null ? panelRoot.transform : null);
     public KeyCode ToggleKey => toggleKey;
 
     /// <summary>창이 열리고 닫힐 때. 덧붙인 줄이 열 때 값을 다시 읽고 닫을 때 저장하는 데 쓴다.</summary>

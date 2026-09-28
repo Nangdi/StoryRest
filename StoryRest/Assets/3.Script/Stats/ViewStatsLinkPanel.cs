@@ -4,7 +4,6 @@ using System.Text;
 using StoryRest.ArUco;
 using TMPro;
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace StoryRest.Stats
 {
@@ -16,10 +15,15 @@ namespace StoryRest.Stats
     /// 월 PC(wall)에는 세트가 없어 HUD 가 없고, 링크는 세트가 아니라 PC 단위의 일이기 때문이다.
     ///
     /// 표시 전용이다. 값을 바꾸는 조작이 없으므로 편집모드 밖에서 받는다(→ SPEC §6, F4 와 같은 예외).
+    ///
+    /// 판은 프리팹이다(→ ARCHITECTURE §3). 처음 F7 을 누를 때 한 번 복제하고, 그 뒤로는 켜고 끄기만 한다.
     /// </summary>
     public class ViewStatsLinkPanel : MonoBehaviour
     {
         [SerializeField] KeyCode toggleKey = KeyCode.F7;
+
+        [Tooltip("Assets/9.Prefab/StatsLinkPanel.prefab — 디스플레이 0 에 띄울 판. 자리·글꼴·색은 프리팹이 정한다.")]
+        [SerializeField] GameObject panelPrefab;
 
         StoryRestApp _app;
 
@@ -47,6 +51,8 @@ namespace StoryRest.Stats
         {
             if (Input.GetKeyDown(toggleKey)) SetVisible(!_visible);
             if (!_visible) return;
+
+            if (_text == null) return;
 
             _builder.Clear();
             Append(_builder);
@@ -183,56 +189,24 @@ namespace StoryRest.Stats
 
         // ── 표시 ─────────────────────────────────────────────────────────────
 
-        // 디스플레이 0 의 오버레이. 세트 HUD(좌상단)와 겹치지 않게 우상단에 둔다.
+        // 디스플레이 0 의 오버레이. 세트 HUD(좌상단)와 겹치지 않게 우상단에 둔다 — 그 자리는 프리팹이 정한다.
         void Build()
         {
-            var canvasGo = new GameObject("StatsLinkCanvas", typeof(Canvas), typeof(CanvasScaler));
-            canvasGo.transform.SetParent(transform, false);
+            if (panelPrefab == null)
+            {
+                Debug.LogError("[Stats] F7 링크 상태 패널의 프리팹이 비어 있습니다. " +
+                               "씬의 StoryRestApp > ViewStatsLinkPanel 에 Assets/9.Prefab/StatsLinkPanel.prefab 을 넣으세요.");
+                return;
+            }
 
-            var canvas = canvasGo.GetComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.targetDisplay = 0;
-            canvas.sortingOrder = 200;
+            var instance = Instantiate(panelPrefab, transform);
+            instance.name = "StatsLinkCanvas";
 
-            var scaler = canvasGo.GetComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1920f, 1080f);
-            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
-            scaler.matchWidthOrHeight = 0.5f;
+            _panel = (RectTransform)instance.transform;
+            _text = instance.GetComponentInChildren<TMP_Text>(true);
 
-            var panelGo = new GameObject("Panel", typeof(RectTransform));
-            panelGo.transform.SetParent(canvasGo.transform, false);
-
-            _panel = panelGo.GetComponent<RectTransform>();
-            _panel.anchorMin = _panel.anchorMax = _panel.pivot = new Vector2(1f, 1f);
-            _panel.sizeDelta = new Vector2(760f, 0f);
-            _panel.anchoredPosition = new Vector2(-24f, -24f);
-
-            var background = panelGo.AddComponent<Image>();
-            background.color = new Color(0f, 0f, 0f, 0.78f);
-            background.raycastTarget = false;
-
-            var layout = panelGo.AddComponent<VerticalLayoutGroup>();
-            layout.padding = new RectOffset(28, 28, 24, 24);
-            layout.childControlWidth = true;
-            layout.childControlHeight = true;
-            layout.childForceExpandWidth = true;
-            layout.childForceExpandHeight = false;
-
-            var fitter = panelGo.AddComponent<ContentSizeFitter>();
-            fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-            var textGo = new GameObject("Text", typeof(RectTransform));
-            textGo.transform.SetParent(_panel, false);
-
-            _text = textGo.AddComponent<TextMeshProUGUI>();
-            _text.color = Color.white;
-            _text.raycastTarget = false;
-            _text.richText = true;
-            _text.alignment = TextAlignmentOptions.TopLeft;
-            _text.fontSize = 22f;
-            _text.lineSpacing = 8f;
+            if (_text == null)
+                Debug.LogError("[Stats] F7 패널 프리팹 안에 TMP 글상자가 없습니다: " + panelPrefab.name);
         }
     }
 }

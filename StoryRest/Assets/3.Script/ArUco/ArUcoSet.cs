@@ -124,8 +124,16 @@ namespace StoryRest.ArUco
 
             _appear = new ArUcoAppearTracker(config.appear) { GraceSeconds = config.viewResumeGraceSeconds };
 
-            _view = gameObject.AddComponent<ArUcoProjectionView>();
-            _view.Setup(set.name, displayIndex, viewport, setIndex);
+            // 화면은 프리팹이 들고 있다(→ ARCHITECTURE §3). 세트 프리팹의 뿌리에 이미 붙어 있는 것을 쓴다.
+            _view = GetComponent<ArUcoProjectionView>();
+            if (_view == null || !_view.Setup(set.name, displayIndex, viewport, setIndex))
+            {
+                Debug.LogError($"[ArUco] 세트 '{set.name}' 의 화면을 만들지 못해 이 세트를 띄우지 않습니다. " +
+                               "Assets/9.Prefab/ArUcoSet.prefab 을 확인하세요.");
+                _view = null;
+                return;
+            }
+
             _view.ShowStatus("카메라를 여는 중입니다...");
 
             // 영상 슬롯은 세트마다 따로 갖는다. 세트가 둘이면 디코더도 그만큼 늘어나므로
@@ -135,7 +143,14 @@ namespace StoryRest.ArUco
 
             // 검출기는 세트마다 별도 인스턴스다. 같은 GameObject 에 둘을 붙일 수 없으므로
             // (DisallowMultipleComponent) 세트가 각자의 GameObject 를 갖는 구조여야 한다.
-            _tracker = gameObject.AddComponent<ArUcoMarkerTracker>();
+            // 이것도 세트 프리팹의 뿌리에 붙어 있다 — 설정을 넣기 전에는 Update 가 아무것도 하지 않는다.
+            _tracker = GetComponent<ArUcoMarkerTracker>();
+            if (_tracker == null)
+            {
+                Debug.LogError($"[ArUco] 세트 '{set.name}' 프리팹에 ArUcoMarkerTracker 가 없습니다.");
+                return;
+            }
+
             ApplyConfigToTracker();
 
             // 전시 중에는 프로젝터에 카메라 영상을 쏘지 않는다. 설정으로 켠 세트만 프레임을 올린다.

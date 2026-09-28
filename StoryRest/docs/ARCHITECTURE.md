@@ -165,16 +165,17 @@
    │   AppSettings (Setting.json → floor, role)
    │   ArUcoConfig (aruco.json   → sets[])
    │
-   ├─ Set_A                         ← ArUcoSet  (카메라 1 : 프로젝터 1)   role: all · aruco
+   ├─ ArUcoSet_A                    ← ArUcoSet. 씬에 미리 놓인 프리팹 인스턴스   role: all · aruco
+   │                                   sets[] 의 이 층 항목을 순서대로 맡는다
    │  ├─ ArUcoMarkerTracker         카메라 캡처 + 마커 검출 (세트 전용 인스턴스)
    │  ├─ ArUcoContentLibrary        floor_<N>/<id>/video/ 스캔 + AVPro 플레이어 풀
    │  └─ ArUcoProjectionView        Camera(targetDisplay) + Canvas + 워프 UI 풀
    │
-   ├─ Set_B                         ← 2·3층에서만 생성 (sets[] 길이가 결정)
+   ├─ ArUcoSet_B                    ← 두 번째 세트. 이 층이 안 쓰면 꺼진다
    │  └─ (동일 구성)
    │
-   ├─ KeywordWall_0                 ← 키워드 월                            role: all · wall
-   ├─ KeywordWall_1
+   ├─ KeywordWall_A                 ← 키워드 월. 씬에 미리 놓인 프리팹 인스턴스  role: all · wall
+   ├─ KeywordWall_B                     walls[] 의 이 층·역할 항목을 순서대로 맡는다. 남으면 꺼진다
    │
    ├─ ArUcoEditMode                 ← 편집모드. 세트를 골라 그 세트를 조정  (세트가 있을 때만)
    ├─ ViewStatsServer               ← 관람 기록을 월 PC 로 보냄            role: aruco
@@ -245,14 +246,65 @@ canvas.planeDistance = 1f;
 
 ### UI는 uGUI로 고정한다
 
-화면 구성은 **uGUI(Canvas 기반)** 만 쓴다. UI Toolkit(UIElements)은 쓰지 않는다.
+화면 구성은 **uGUI(Canvas 기반)** 만 쓴다. UI Toolkit(UIElements)은 쓰지 않는다. IMGUI(`OnGUI`)도 쓰지 않는다.
 
 - 마커 위에 눕히는 콘텐츠는 `ArUcoWarpedImage`(= `UnityEngine.UI.Graphic` 상속)로 그린다.
   임의의 사각형으로 메시를 직접 만들어야 하는데, 이건 uGUI 의 `OnPopulateMesh` 로만 가능하다.
 - 텍스트는 **TextMeshPro** 로 통일한다. 기존 프로젝트 UI(`SerialPortLogPanel` 등)가 이미 `TMP_Text` 를 쓴다.
-- 한글은 **TMP Settings 의 fallback 에 등록한 `NotoSansKR-Regular SDF`** 가 채운다.
-  런타임에 만드는 UI 도 폰트를 따로 지정할 필요가 없고, 전시 PC 에 어떤 OS 폰트가 깔려 있든 결과가 같다.
+- 글꼴을 지정하지 않은 UI 의 한글은 **TMP Settings 의 fallback 에 등록한 `NotoSansKR-Regular SDF`** 가 채운다.
+  전시 PC 에 어떤 OS 폰트가 깔려 있든 결과가 같다.
   (legacy `Text` + `Font.CreateDynamicFontFromOSFont` 방식은 쓰지 않는다 — 설치 환경에 의존한다.)
+  관람객에게 보이는 화면은 fallback 에 맡기지 않고 프리팹에서 글꼴을 직접 지정한다 —
+  월은 `Paperlogy-5Medium SDF`(`10.Font/`) 를 쓴다. 한글 11,172자를 미리 굽지 않도록 **Dynamic** 아틀라스다.
+
+#### 보이는 화면은 프리팹으로 만든다
+
+**관람객에게 보이는 화면은 코드로 `new GameObject` 하지 않고, 프리팹으로 만들어 씬에 미리 놓아 둔다.**
+코드가 만들면 에디터에서 보이지 않아 자리·크기·글꼴을 숫자만 고쳐 가며 맞혀야 한다 —
+설치 현장에서 가장 자주 손보는 것이 바로 그 값들이다.
+
+프리팹을 런타임에 `Instantiate` 하는 것도 마찬가지로 "런타임 생성" 이다 — 씬을 열었을 때 하이어라키에 없다.
+그래서 **인스턴스까지 씬에 놓는다**: `StartScene` 의 `StoryRestApp` 아래에 `ArUcoSet_A/B` · `KeywordWall_A/B` 가
+이미 있고, `StoryRestApp` 은 설정(`sets[]` · `walls[]`)의 이 층·역할 항목을 **순서대로 하나씩 맡기고 남는 것은 끈다**
+(`SleepUnusedScreens`). 설정이 씬에 놓인 수보다 많이 요구하면 시작 로그와 `Problems` 에 "씬에 하나 더 놓으라" 고 남는다.
+프리팹을 고치면 모든 인스턴스가 따라오고, 한 화면만 다르게 하고 싶으면 그 인스턴스에서 오버라이드한다.
+
+| | 프리팹 | 코드 / 설정 파일 |
+|---|---|---|
+| 정하는 것 | 자리 · 크기 · 글꼴 · 색 · 배경 · 계층 | 무엇을 띄울지, 언제, 얼마나, 어느 디스플레이로 |
+| 바꾸는 법 | 에디터에서 보면서 → 빌드 다시 | json 을 고쳐 → 재시작만 |
+| 예 | `9.Prefab/KeywordWall.prefab` | `keywordwall.json` |
+
+- **키워드 월**(`KeywordWall.prefab`) — 카메라 · 캔버스 · 주제 카드 · 떠다니는 항목 원본이 한 프리팹에 들어 있다.
+  씬에 인스턴스 둘(`KeywordWall_A/B`)이 놓여 있고, `KeywordWall` 은 그것을 **움직이기만** 한다.
+  - `Items` — 떠다니는 것들이 들어갈 자리. 항목은 `Templates/WordItem`(낱말) 이나 `Templates/SpriteItem`(그림)을
+    복제해 만든다. 원본은 꺼진 `Templates` 아래 있어 화면에 뜨지 않는다.
+    항목의 **위치만은** 코드가 매 프레임 계산하므로 앵커·피벗은 가운데로 고정한다.
+  - `Spotlight` — 주제 카드. 제목(`Label`) · 주제 이름(`Topic`) · 그림 칸(`ImageBox`)이 루트 안에 **각자 자유롭게** 놓인다.
+    레이아웃 그룹을 두지 않는다 — 두면 자식 자리를 매 프레임 덮어써서 씬에서 끌어도 되돌아간다.
+    그림은 `AspectRatioFitter` 로 칸 안에 맞는다. `showTopicName` 을 끄면 주제 줄만 숨고 자리는 비어 있다.
+    떠다니는 것들이 비켜 가는 자리(`ReservedArea`)는 **루트의 사각형**이다 — 조각을 루트 밖으로 빼면 루트도 키운다.
+- **ArUco 세트**(`ArUcoSet.prefab`) — 뿌리에 `ArUcoSet` · `ArUcoProjectionView` · `ArUcoMarkerTracker` 가 붙어 있고,
+  그 아래 카메라 · 캔버스 · 레이어가 들어 있다. 씬에 인스턴스 둘(`ArUcoSet_A/B`)이 놓여 있다.
+  - 레이어가 **자식 순서로 보인다**: `CameraPreview < Highlight < Rings < Content < Labels < Overlays < Status < EditHud`.
+    예전에는 판이 늘 때마다 라벨 레이어를 맨 뒤로 옮겨 순서를 지켰는데, 이제 부모가 순서를 정한다.
+  - 판 · 라벨 · 조준점은 `Templates` 아래 원본을 복제해 만든다. 개수가 마커 수에 달렸기 때문이다.
+  - **콘텐츠가 놓이는 자리는 에디터에서 못 잡는다** — 카메라가 읽은 마커 평면과 호모그래피가 정한다(→ §1).
+    프리팹이 정하는 것은 레이어 순서 · 글꼴 · 색 · 안내판 모양이다.
+- **점검용 패널**도 같다.
+  - `StatsLinkPanel.prefab` (F7 링크 상태) — 자기 캔버스째 프리팹. 처음 켤 때 한 번 복제한다.
+  - `StatsTrafficPanel.prefab` (ESC 설정창 오른쪽 TCP 패널) — 뿌리에 `ViewStatsTrafficPanel` 이 붙어 있다. 시작할 때 설정창 캔버스에 복제한다.
+  - 이 두 점검용 판은 관람객이 볼 일이 없고 자리 조절 대상이 아니라 복제로 둔다. 씬에 놓고 싶으면 놓아도 코드는 그대로다.
+  - `SettingsRows.prefab` (ESC 설정창에 덧붙이는 줄) — 줄의 **모양**(제목 · 설명 · 슬라이더 줄 · 드롭다운 줄 · 토글 줄)이
+    원본으로 들어 있고, `ArUcoSettingsPanel` 이 복제해 값을 물린다. 줄의 **개수와 내용**은 역할에 따라 달라지므로 코드가 정한다.
+  - 이 셋은 프리팹을 인스펙터에서 물려야 하므로 **컴포넌트를 씬의 `StoryRestApp` 에 미리 붙여 둔다**.
+    `StoryRestApp` 은 `AddComponent` 하지 않고 `GetComponent` 로 찾으며, 없으면 무엇을 붙여야 하는지 로그로 알린다.
+
+`ArUcoStatsPanel`(F4) · `ArUcoHelpPanel`(F1) · `ArUcoEditMode`(F2) 는 자기 캔버스가 없다 —
+세트 화면의 안내판(`ArUcoProjectionView.ShowHud`)에 글만 넘기므로 프리팹으로 뺄 것이 없다.
+
+> `Assets/ArUcoPages/` 의 `ArUcoPageOverlay` · `ArUcoAdjustMode` 는 아직 코드로 캔버스를 만든다.
+> 지금 앱이 쓰지 않는 옛 경로이고 `ArUcoSet` 으로 분해되는 중이라 그대로 둔다(→ §8).
 
 ### 카메라 영상은 투사하지 않는다
 
@@ -289,6 +341,10 @@ ArUco PC 한 대가 세트 2개를 도는 구성에서 가장 크게 절약되�
 - `statsHost` / `statsPort` — 관람 기록 링크. `aruco` 가 `statsPort` 로 대기하고 `wall` 이 `statsHost:statsPort` 에 붙는다.
 
 ### `keywordwall.json` — 월 화면 배정
+
+보이는 모양(자리·크기·글꼴·색·배경)은 여기에 없다 — `KeywordWall.prefab` 이 가진다(→ §3).
+이 파일에 남는 것은 **어느 프로젝터로 · 언제 · 얼마나**, 그리고 항목마다 다르게 뽑는 **범위**
+(`minFontSize~maxFontSize`, `colors[]`, `spriteGradients[]`)다. 범위는 값 하나가 아니라서 프리팹으로 담을 수 없다.
 
 `walls[]` 항목마다 `displayIndex` 와 함께 `floors`(층) · `roles`(역할) 필터가 있다. 둘 다 비우면 어디서나 쓴다.
 역할 필터가 필요한 이유 — 월 PC 에는 세트가 없어 월이 **0번 디스플레이부터** 시작하고,
@@ -376,6 +432,14 @@ ArUco PC 한 대가 세트 2개를 도는 구성에서 가장 크게 절약되�
 씬의 ESC 설정창(`SettingsPanelUI`)에 실행할 때 줄을 덧붙인다. 씬은 건드리지 않는다.
 설치자가 현장에서 "느낌으로" 맞추는 값만 둔다 — 카메라 번호·디스플레이 배정처럼 잘못 건드리면 화면이
 사라지는 값은 `aruco.json` 을 직접 고치게 둔다.
+
+**키워드 월 값도 여기서 만진다.** `keywordwall.json` 의 시간(카드 간격·머무는 시간·페이드·순위 갱신 주기)과
+떠다니는 것의 속도·투명도·수명·크기·밀어내기·가장자리 여백을 슬라이더로 두고, `alwaysOn`·`showTopicName`·`avoidDuplicates` 는 체크박스다.
+살아 있는 월이 같은 `KeywordWallConfig` 객체를 보므로 값을 넣는 즉시 따라오고(`KeywordWall.ApplyConfig` 는 한 번만 읽는
+주제 줄만 다시 맞춘다), 1초 뒤 `keywordwall.json` 에 저장한다(`_keywordDirty`). ArUco 값과 저장 파일이 다르므로 더럽힘 플래그를 따로 둔다.
+`maxOnScreen` 은 시작할 때 항목을 만들므로 재시작해야 적용된다고 줄에 적어 둔다.
+
+줄이 50개를 넘어 창(680×980)이 스크롤이다 — `SettingsPanel` › `Viewport` › `Content` 구조로, 줄은 `SettingsPanelUI.RowsRoot`(= Content)에 붙는다.
 
 | 줄 | 값 | 적용 |
 |---|---|---|

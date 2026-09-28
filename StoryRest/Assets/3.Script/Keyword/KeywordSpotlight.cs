@@ -9,7 +9,7 @@ namespace StoryRest.Keyword
     /// <summary>월 왼쪽 위에 한 번에 하나씩 뜨는 카드. 제목과 그림. 그림이 없는 마커는 카드가 되지 않는다.</summary>
     public class SpotlightCard
     {
-        public string label;        // "오늘의 추천" 같은 카드 이름
+        public string label;        // "오늘의 추천 컨텐츠" 같은 카드 이름
         public string topic;        // 주제 이름(마커 폴더 이름에서 번호를 뗀 것). 폴더에 제목이 없으면 null
         public int views;           // 인기 카드의 관람 횟수. 추천은 0
         public int markerId;
@@ -17,7 +17,7 @@ namespace StoryRest.Keyword
     }
 
     /// <summary>
-    /// 월에 띄울 "오늘의 추천 · 오늘 / 이번 주 / 이달의 인기 주제" 카드를 만든다(→ SPEC §3.1).
+    /// 월에 띄울 "오늘의 추천 컨텐츠 · 오늘 / 이번주 / 이번달의 베스트셀러" 카드를 만든다(→ SPEC §3.1).
     ///
     /// 재료는 관람 기록(ViewLog)이다. 월 PC 는 ArUco PC 에서 받아 적은 미러를 읽으므로 어느 역할이든 같은 코드다.
     /// 세는 기준은 **관람 횟수**(건수)다. 시간 합계로 세면 한 사람이 오래 본 주제가 여럿이 잠깐씩 본 주제를 이긴다.

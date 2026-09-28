@@ -6,7 +6,14 @@ using UnityEngine.UI;
 namespace StoryRest.ArUco
 {
     /// <summary>
-    /// 세트 하나의 출력을 담당한다. 전용 Camera + Canvas 를 만들고, 마커 평면 위에 콘텐츠를 눕혀 그린다.
+    /// 세트 하나의 출력을 담당한다. 전용 Camera + Canvas 위에, 마커 평면에 맞춰 콘텐츠를 눕혀 그린다.
+    ///
+    /// **화면은 프리팹이 만든다**(→ ARCHITECTURE §3). 카메라 · 캔버스 · 레이어 · 안내판 · 풀 원본이
+    /// `Assets/9.Prefab/ArUcoSet.prefab` 안에 있고, 이 스크립트는 그것들을 켜고 끄고 좌표만 넣는다.
+    /// 레이어 순서(무엇이 무엇 위에 오는가)도 프리팹의 자식 순서로 보인다.
+    ///
+    /// 콘텐츠가 놓이는 **자리는 에디터에서 잡을 수 없다** — 카메라가 읽은 마커 평면과 호모그래피가 정한다.
+    /// 프리팹이 정하는 것은 레이어 순서 · 글꼴 · 색 · 안내판 모양이다.
     ///
     /// ScreenSpaceOverlay 대신 Camera.targetDisplay 를 쓰는 이유:
     /// Overlay 캔버스는 Screen.width/height 에 묶이는데 그 값은 주 디스플레이 기준이라
@@ -25,17 +32,32 @@ namespace StoryRest.ArUco
         // (레이어를 나누는 대신 거리로 분리한다 — 프로젝트 레이어를 건드리지 않아도 된다.)
         const float SetSeparation = 10000f;
 
-        Camera _camera;
-        Canvas _canvas;
-        RectTransform _canvasRect;
-        TMP_Text _statusText;
-        ArUcoWarpedImage _highlight;
+        [Header("화면 — 프리팹 안의 조각들")]
+        [SerializeField] Camera _camera;
+        [SerializeField] Canvas _canvas;
+        [SerializeField] RectTransform _canvasRect;
 
-        // 편집모드 전용. 평상시에는 만들지 않는다.
-        RawImage _cameraPreview;
-        RectTransform _hudPanel;
-        Image _hudBackground;
-        TMP_Text _hudText;
+        [Header("레이어 — 자식 순서가 그리는 순서다")]
+        [Tooltip("점검용 카메라 영상. 맨 뒤에 깔린다. 전시 중에는 꺼져 있다.")]
+        [SerializeField] RawImage _cameraPreview;
+
+        [Tooltip("편집 중인 마커를 가리키는 판.")]
+        [SerializeField] ArUcoWarpedImage _highlight;
+
+        [SerializeField] RectTransform _ringLayer;      // 읽는 중 빛 고리
+        [SerializeField] RectTransform _contentLayer;   // 콘텐츠 판
+        [SerializeField] RectTransform _labelLayer;     // 마커 안내 문구. 늘 콘텐츠 위
+        [SerializeField] RectTransform _overlayLayer;   // 조준점 · 투사 마커
+        [SerializeField] TMP_Text _statusText;
+
+        [Header("편집모드 안내판")]
+        [SerializeField] RectTransform _hudPanel;
+        [SerializeField] TMP_Text _hudText;
+
+        [Header("풀 원본 — 꺼진 자리에 두고 복제해 쓴다")]
+        [SerializeField] ArUcoWarpedImage _warpedTemplate;
+        [SerializeField] TMP_Text _labelTemplate;
+        [SerializeField] RawImage _overlayTemplate;
 
         readonly List<ArUcoWarpedImage> _pool = new List<ArUcoWarpedImage>();
 
@@ -44,17 +66,11 @@ namespace StoryRest.ArUco
         static Shader _revealShader;
         static bool _revealShaderMissing;
 
-        // 읽는 중 빛 고리. 콘텐츠보다 먼저 만든 층에 두어 항상 콘텐츠 뒤에 깔린다.
-        RectTransform _ringLayer;
         readonly List<ArUcoWarpedImage> _ringPool = new List<ArUcoWarpedImage>();
         int _ringUsed;
         readonly List<RawImage> _overlayPool = new List<RawImage>();
         readonly List<TMP_Text> _labelPool = new List<TMP_Text>();
         readonly List<Vector2> _nodes = new List<Vector2>();
-
-        // 라벨은 항상 콘텐츠 판 위에 와야 한다. 판이 늘어날 때마다 이 레이어를 맨 뒤로 옮겨
-        // (= 가장 나중에 그려지게) 순서를 유지한다. → NewWarpedImage
-        RectTransform _labelLayer;
 
         int _overlayUsed;
         int _labelUsed;
@@ -71,54 +87,40 @@ namespace StoryRest.ArUco
         /// <param name="displayIndex">투사할 Unity 디스플레이 번호</param>
         /// <param name="viewport">에디터에서 세트를 나눠 볼 때 쓰는 뷰포트. 빌드에서는 전체 화면.</param>
         /// <param name="setIndex">카메라를 서로 떨어뜨리는 데 쓴다</param>
-        public void Setup(string setName, int displayIndex, Rect viewport, int setIndex)
+        /// <returns>프리팹 연결이 온전해 쓸 수 있으면 true.</returns>
+        public bool Setup(string setName, int displayIndex, Rect viewport, int setIndex)
         {
-            var cameraGo = new GameObject($"Camera_{setName}");
-            cameraGo.transform.SetParent(transform, false);
+            if (_camera == null || _canvas == null || _canvasRect == null || _statusText == null
+                || _highlight == null || _ringLayer == null || _contentLayer == null
+                || _labelLayer == null || _overlayLayer == null
+                || _warpedTemplate == null || _labelTemplate == null || _overlayTemplate == null)
+            {
+                Debug.LogError($"[ArUco] 세트 화면 프리팹의 연결이 비었습니다({name}). " +
+                               "Assets/9.Prefab/ArUcoSet.prefab 의 ArUcoProjectionView 에서 " +
+                               "카메라·캔버스·레이어·풀 원본을 이어 주세요.");
+                return false;
+            }
+
+            _camera.name = $"Camera_{setName}";
+            _canvas.name = $"Canvas_{setName}";
 
             // 세트끼리 겹쳐 보이지 않도록 축을 따라 크게 떨어뜨린다.
-            cameraGo.transform.position = new Vector3(0f, (setIndex + 1) * SetSeparation, 0f);
+            _camera.transform.position = new Vector3(0f, (setIndex + 1) * SetSeparation, 0f);
 
-            _camera = cameraGo.AddComponent<Camera>();
+            // 여기서 정하는 것은 "어느 프로젝터로 · 화면의 어느 칸에 · 몇 번째로 그리는가" 뿐이다.
+            // 배경색·투영방식·클리핑은 프리팹의 카메라가 이미 정해 두었다.
             _camera.targetDisplay = Mathf.Max(0, displayIndex);
             _camera.rect = viewport;
-            _camera.clearFlags = CameraClearFlags.SolidColor;
-            _camera.backgroundColor = Color.black;   // 투사면에서 검은색 = 빛 없음
-            _camera.orthographic = true;
-            _camera.nearClipPlane = 0.1f;
-            _camera.farClipPlane = 100f;
-            _camera.allowHDR = false;
-            _camera.allowMSAA = false;
             _camera.depth = setIndex;
 
-            var canvasGo = new GameObject($"Canvas_{setName}", typeof(Canvas), typeof(CanvasScaler));
-            canvasGo.transform.SetParent(cameraGo.transform, false);
-
-            _canvas = canvasGo.GetComponent<Canvas>();
-            _canvas.renderMode = RenderMode.ScreenSpaceCamera;
             _canvas.worldCamera = _camera;
-            _canvas.planeDistance = 1f;
-            _canvas.sortingOrder = 0;
 
-            // 상수 배율이라 RectTransform 1 단위 = 화면 1픽셀이 된다. 좌표 계산이 단순해진다.
-            var scaler = canvasGo.GetComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
-            scaler.scaleFactor = 1f;
-
-            _canvasRect = canvasGo.GetComponent<RectTransform>();
-
-            // 편집 중인 마커를 표시할 판. 콘텐츠보다 먼저 만들어 항상 뒤에 깔리게 한다.
-            _highlight = NewWarpedImage("Highlight");
-            _highlight.color = new Color(1f, 0.85f, 0.2f, 0.35f);
             _highlight.enabled = false;
-
-            var ringLayerGo = new GameObject("Rings", typeof(RectTransform));
-            ringLayerGo.transform.SetParent(_canvasRect, false);
-            _ringLayer = ringLayerGo.GetComponent<RectTransform>();
-            Stretch(_ringLayer);
-
-            _statusText = NewText("Status");
             _statusText.enabled = false;
+            if (_cameraPreview != null) _cameraPreview.enabled = false;
+            if (_hudPanel != null) _hudPanel.gameObject.SetActive(false);
+
+            return true;
         }
 
         public void SetProjection(ArUcoProjection projection)
@@ -132,23 +134,12 @@ namespace StoryRest.ArUco
         /// </summary>
         public void ShowCameraPreview(Texture texture)
         {
+            if (_cameraPreview == null) return;
+
             if (texture == null)
             {
-                if (_cameraPreview != null) _cameraPreview.enabled = false;
+                _cameraPreview.enabled = false;
                 return;
-            }
-
-            if (_cameraPreview == null)
-            {
-                var go = new GameObject("CameraPreview", typeof(RectTransform));
-                // 콘텐츠보다 뒤에 깔리도록 맨 앞에 넣는다(자식 순서 = 그리는 순서).
-                go.transform.SetParent(_canvasRect, false);
-                go.transform.SetAsFirstSibling();
-
-                _cameraPreview = go.AddComponent<RawImage>();
-                _cameraPreview.raycastTarget = false;
-                _cameraPreview.color = new Color(1f, 1f, 1f, 0.5f);
-                Stretch(_cameraPreview.rectTransform);
             }
 
             _cameraPreview.texture = texture;
@@ -207,11 +198,7 @@ namespace StoryRest.ArUco
             if (!BuildGrid(markerPlane, placement, ringStyle, 0f)) return;
 
             while (_ringPool.Count <= _ringUsed)
-            {
-                var ring = NewWarpedImage("Ring" + _ringPool.Count);
-                ring.transform.SetParent(_ringLayer, false);
-                _ringPool.Add(ring);
-            }
+                _ringPool.Add(NewWarpedImage("Ring" + _ringPool.Count, _ringLayer));
 
             var image = _ringPool[_ringUsed];
             image.SetTexture(ArUcoRingTexture.Get());
@@ -318,33 +305,10 @@ namespace StoryRest.ArUco
         {
             while (_labelPool.Count <= index)
             {
-                if (_labelLayer == null)
-                {
-                    var layerGo = new GameObject("Labels", typeof(RectTransform));
-                    layerGo.transform.SetParent(_canvasRect, false);
-
-                    _labelLayer = layerGo.GetComponent<RectTransform>();
-                    Stretch(_labelLayer);
-                    _labelLayer.SetAsLastSibling();
-                }
-
-                var go = new GameObject($"Label{_labelPool.Count}", typeof(RectTransform));
-                go.transform.SetParent(_labelLayer, false);
-
-                var text = go.AddComponent<TextMeshProUGUI>();
-                text.color = Color.white;
-                text.raycastTarget = false;
-                text.richText = true;
-                text.alignment = TextAlignmentOptions.Center;
-                text.enableWordWrapping = true;
-
-                // 카메라와의 거리에 따라 마커가 크게도 작게도 잡히므로 글자를 판 크기에 맞춘다.
-                text.enableAutoSizing = true;
-                text.fontSizeMin = 10f;
-                text.fontSizeMax = 64f;
-
-                var rect = text.rectTransform;
-                rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0.5f, 0.5f);
+                var text = Instantiate(_labelTemplate, _labelLayer);
+                text.gameObject.SetActive(true);
+                text.name = $"Label{_labelPool.Count}";
+                text.enabled = false;
 
                 _labelPool.Add(text);
             }
@@ -354,9 +318,8 @@ namespace StoryRest.ArUco
         // ── 편집모드용 ───────────────────────────────────────────────────────────
 
         /// <summary>
-        /// 편집모드 안내판. null 을 넘기면 숨긴다.
-        /// 전시 중에는 어떤 편집 UI 도 보이지 않아야 하므로 필요할 때 처음 만든다.
-        /// 높이는 글에 맞춰 늘고 줄어든다 — 고정 크기면 짧은 안내에도 화면 한 구석을 통째로 가린다.
+        /// 편집모드 안내판. null 을 넘기면 숨긴다. 전시 중에는 꺼져 있다.
+        /// 높이는 글에 맞춰 늘고 줄어든다(프리팹의 ContentSizeFitter) — 고정 크기면 짧은 안내에도 한 구석을 통째로 가린다.
         /// </summary>
         /// <param name="anchor">
         /// 놓을 자리. 코너 보정은 네 귀퉁이의 조준점을 가리면 안 되므로 가운데에 두고,
@@ -364,13 +327,13 @@ namespace StoryRest.ArUco
         /// </param>
         public void ShowHud(string text, HudAnchor anchor = HudAnchor.TopLeft)
         {
+            if (_hudPanel == null || _hudText == null) return;
+
             if (string.IsNullOrEmpty(text))
             {
-                if (_hudPanel != null) _hudPanel.gameObject.SetActive(false);
+                _hudPanel.gameObject.SetActive(false);
                 return;
             }
-
-            if (_hudPanel == null) BuildHud();
 
             const float margin = 24f;
             Vector2 a;
@@ -390,44 +353,6 @@ namespace StoryRest.ArUco
 
             _hudPanel.gameObject.SetActive(true);
             _hudText.text = text;
-        }
-
-        void BuildHud()
-        {
-            var panelGo = new GameObject("EditHud", typeof(RectTransform));
-            panelGo.transform.SetParent(_canvasRect, false);
-
-            _hudPanel = panelGo.GetComponent<RectTransform>();
-            _hudPanel.anchorMin = _hudPanel.anchorMax = _hudPanel.pivot = new Vector2(0f, 1f);
-            _hudPanel.sizeDelta = new Vector2(720f, 0f);
-            _hudPanel.anchoredPosition = new Vector2(24f, -24f);
-
-            _hudBackground = panelGo.AddComponent<Image>();
-            _hudBackground.color = new Color(0f, 0f, 0f, 0.78f);
-            _hudBackground.raycastTarget = false;
-
-            // 폭은 720 고정, 높이는 글의 줄 수를 따라간다.
-            var layout = panelGo.AddComponent<VerticalLayoutGroup>();
-            layout.padding = new RectOffset(28, 28, 24, 24);
-            layout.childControlWidth = true;
-            layout.childControlHeight = true;
-            layout.childForceExpandWidth = true;
-            layout.childForceExpandHeight = false;
-
-            var fitter = panelGo.AddComponent<ContentSizeFitter>();
-            fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-            var textGo = new GameObject("Text", typeof(RectTransform));
-            textGo.transform.SetParent(_hudPanel, false);
-
-            _hudText = textGo.AddComponent<TextMeshProUGUI>();
-            _hudText.color = Color.white;
-            _hudText.raycastTarget = false;
-            _hudText.richText = true;
-            _hudText.alignment = TextAlignmentOptions.TopLeft;
-            _hudText.fontSize = 22f;
-            _hudText.lineSpacing = 8f;
         }
 
         public void BeginOverlay() => _overlayUsed = 0;
@@ -464,14 +389,10 @@ namespace StoryRest.ArUco
         {
             while (_overlayPool.Count <= index)
             {
-                var go = new GameObject($"Overlay{_overlayPool.Count}", typeof(RectTransform));
-                go.transform.SetParent(_canvasRect, false);
-
-                var image = go.AddComponent<RawImage>();
-                image.raycastTarget = false;
-
-                var rect = image.rectTransform;
-                rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0.5f, 0.5f);
+                var image = Instantiate(_overlayTemplate, _overlayLayer);
+                image.gameObject.SetActive(true);
+                image.name = $"Overlay{_overlayPool.Count}";
+                image.enabled = false;
 
                 _overlayPool.Add(image);
             }
@@ -543,53 +464,25 @@ namespace StoryRest.ArUco
 
         ArUcoWarpedImage GetView(int index)
         {
-            while (_pool.Count <= index) _pool.Add(NewWarpedImage($"Content{_pool.Count}"));
+            while (_pool.Count <= index) _pool.Add(NewWarpedImage($"Content{_pool.Count}", _contentLayer));
             return _pool[index];
         }
 
-        ArUcoWarpedImage NewWarpedImage(string name)
+        /// <summary>
+        /// 프리팹의 원본을 복제해 판 하나를 만든다. 격자 꼭짓점을 캔버스 로컬 좌표로 직접 넣으므로
+        /// RectTransform 은 원본에서 화면 전체를 덮게 잡아 두었다.
+        ///
+        /// 레이어(부모)가 순서를 정한다 — 고리는 Rings, 콘텐츠는 Content 아래로 간다.
+        /// 예전처럼 판이 늘 때마다 라벨 레이어를 맨 뒤로 옮길 필요가 없다.
+        /// </summary>
+        ArUcoWarpedImage NewWarpedImage(string name, RectTransform parent)
         {
-            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(ArUcoWarpedImage));
-            go.transform.SetParent(_canvasRect, false);
-
-            var image = go.GetComponent<ArUcoWarpedImage>();
-            image.raycastTarget = false;
-
-            // 격자 꼭짓점을 캔버스 로컬 좌표로 직접 넣으므로 RectTransform 은 화면 전체를 덮게 둔다.
-            Stretch(image.rectTransform);
-
-            // 새로 만든 판이 라벨을 덮지 않게 한다. 풀이 늘어날 때만 일어나므로 곧 멈춘다.
-            if (_labelLayer != null) _labelLayer.SetAsLastSibling();
+            var image = Instantiate(_warpedTemplate, parent);
+            image.gameObject.SetActive(true);
+            image.name = name;
+            image.enabled = false;
 
             return image;
-        }
-
-        // 텍스트는 TextMeshPro 로 통일한다(기존 프로젝트 UI 와 같은 방식).
-        // 한글 글리프는 TMP Settings 의 fallback(NotoSansKR)이 채우므로 OS 폰트에 의존하지 않는다 —
-        // 전시 PC 에 어떤 폰트가 깔려 있든 같은 화면이 나온다.
-        TMP_Text NewText(string name)
-        {
-            var go = new GameObject(name, typeof(RectTransform));
-            go.transform.SetParent(_canvasRect, false);
-
-            var text = go.AddComponent<TextMeshProUGUI>();
-            text.color = Color.white;
-            text.raycastTarget = false;
-            text.richText = true;
-            text.alignment = TextAlignmentOptions.Center;
-            text.fontSize = 26f;
-            text.enableWordWrapping = true;
-            Stretch(text.rectTransform);
-            return text;
-        }
-
-        static void Stretch(RectTransform rect)
-        {
-            rect.anchorMin = Vector2.zero;
-            rect.anchorMax = Vector2.one;
-            rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.offsetMin = Vector2.zero;
-            rect.offsetMax = Vector2.zero;
         }
     }
 

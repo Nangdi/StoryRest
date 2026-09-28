@@ -15,11 +15,6 @@ namespace StoryRest.Keyword
         Zigzag,     // 대각선으로 가다 꺾인다
     }
 
-    /// <summary>
-    /// StreamingAssets/keywordwall.json — 벽면 키워드 화면의 동작 설정.
-    ///
-    /// 관심사가 다르므로 aruco.json 과 파일을 나눈다(프로젝트가 port/tcp/Setting 을 나눠 쓰는 방식과 같다).
-    /// </summary>
     /// <summary>키워드 월 화면 하나. 프로젝터 한 대에 대응한다.</summary>
     [Serializable]
     public class WallScreen
@@ -64,15 +59,23 @@ namespace StoryRest.Keyword
     }
 
     /// <summary>
-    /// 월 왼쪽 위의 주제 카드(→ SPEC §3.1). "오늘의 추천 · 오늘 / 이번 주 / 이달의 인기 주제" 가 한 장씩 돌아가며 뜬다.
+    /// 월 왼쪽 위의 주제 카드(→ SPEC §3.1). "오늘의 추천 컨텐츠 · 오늘 / 이번주 / 이번달의 베스트셀러" 가 한 장씩 돌아가며 뜬다.
     /// 카드는 제목과 그림뿐이다. 이름과 시간은 현장에서 바꿀 수 있게 값으로 둔다.
+    ///
+    /// **자리·크기·글꼴·색은 여기에 없다.** 그것들은 KeywordWall 프리팹의 Spotlight 가 가진다(→ ARCHITECTURE §3).
+    /// 여기 남는 것은 "언제 · 얼마나 · 무엇을" 뿐이다.
     /// </summary>
     [Serializable]
     public class SpotlightConfig
     {
         public bool enabled = true;
 
+        // 카드를 상시 띄운다. 쉬는 시간 없이 한 장이 cardSeconds 머문 뒤 바로 다음 장으로 넘어가고,
+        // 카드가 한 장뿐이면 넘기지 않고 그대로 둔다. 자리도 늘 비어 있다. ESC 설정창의 체크박스로 켜고 끈다.
+        public bool alwaysOn = false;
+
         // 카드가 뜨는 간격(초). 한 장이 뜨고 나서 다음 장이 뜰 때까지. 상시 떠 있으면 배경이 아니라 광고판처럼 보여 띄엄띄엄 띄운다.
+        // alwaysOn 이면 쓰지 않는다.
         public float intervalSeconds = 60f;
 
         // 한 장이 떠 있는 시간과 뜨고 질 때 페이드 시간(초). 둘을 합친 것이 간격보다 길면 쉬지 않고 이어진다.
@@ -85,26 +88,11 @@ namespace StoryRest.Keyword
         // 관람 기록을 다시 세는 주기(초). 기록이 한 건 적힐 때마다도 다시 세지만, 자정을 넘길 때를 위해 주기도 둔다.
         public float refreshSeconds = 60f;
 
-        // 카드 자리(1920x1200 기준 픽셀). 왼쪽 위에서 margin 만큼 띄우고, width 너비에 그림은 imageSize 정사각형 안에.
-        public float margin = 56f;
-        public float width = 560f;
-        public float imageSize = 360f;
-
-        // 카드 이름. 순서대로 추천 · 오늘 · 이번 주 · 이달.
-        public string recommendLabel = "오늘의 추천";
-        public string todayLabel = "오늘의 인기 주제";
-        public string weekLabel = "이번 주 인기 주제";
-        public string monthLabel = "이달의 인기 주제";
-
-        // 카드 이름 글자색. 주제 이름은 흰색 고정이다.
-        public string accentColor = "#8FE3FF";
-
-        public Color ResolveAccentColor()
-        {
-            return !string.IsNullOrWhiteSpace(accentColor) && ColorUtility.TryParseHtmlString(accentColor.Trim(), out Color color)
-                ? color
-                : Color.white;
-        }
+        // 카드 이름. 순서대로 추천 · 오늘 · 이번주 · 이번달.
+        public string recommendLabel = "오늘의 추천 컨텐츠";
+        public string todayLabel = "오늘의 베스트셀러";
+        public string weekLabel = "이번주의 베스트셀러";
+        public string monthLabel = "이번달의 베스트셀러";
 
         public void Sanitize()
         {
@@ -112,12 +100,21 @@ namespace StoryRest.Keyword
             cardSeconds = Mathf.Max(2f, cardSeconds);
             fadeSeconds = Mathf.Clamp(fadeSeconds, 0f, cardSeconds * 0.5f);
             refreshSeconds = Mathf.Max(5f, refreshSeconds);
-            margin = Mathf.Max(0f, margin);
-            width = Mathf.Clamp(width, 200f, 1200f);
-            imageSize = Mathf.Clamp(imageSize, 32f, 800f);
         }
     }
 
+    /// <summary>
+    /// StreamingAssets/keywordwall.json — 벽면 키워드 화면의 **동작** 설정.
+    ///
+    /// 관심사가 다르므로 aruco.json 과 파일을 나눈다(프로젝트가 port/tcp/Setting 을 나눠 쓰는 방식과 같다).
+    ///
+    /// 여기와 프리팹의 경계는 이렇다(→ ARCHITECTURE §3):
+    ///   - **프리팹**(`Assets/9.Prefab/KeywordWall.prefab`) — 보이는 모양. 자리·크기·글꼴·색·배경.
+    ///     에디터에서 보면서 잡는 값들이다.
+    ///   - **이 파일** — 시간과 개수, 그리고 항목마다 다르게 뽑는 범위(글자 크기 범위, 색 목록, 그라데이션 목록).
+    ///     "화면마다 다르게 · 매번 다르게" 라서 프리팹의 값 하나로는 담을 수 없는 것들과,
+    ///     현장에서 빌드를 다시 만들지 않고 바꿔야 하는 것들(층·디스플레이 배정, 카드 간격)이다.
+    /// </summary>
     [Serializable]
     public class KeywordWallConfig
     {
@@ -186,8 +183,6 @@ namespace StoryRest.Keyword
         // 글자 색. 현장에서 고치기 쉽도록 16진수 문자열로 둔다.
         public string[] colors = { "#FFFFFF", "#8FE3FF", "#B9C7FF", "#9FFFE0", "#FFE9A8" };
 
-        public Color backgroundColor = Color.black;
-
         // 같은 낱말이 화면에 두 개 뜨지 않게 한다. 키워드가 적을 때는 자동으로 완화된다.
         public bool avoidDuplicates = true;
 
@@ -202,7 +197,7 @@ namespace StoryRest.Keyword
         // 투사면 모서리가 벽에 걸리는 자리에서는 값을 올린다.
         public float edgeMargin = 0.03f;
 
-        // 왼쪽 위 주제 카드(추천 · 인기 주제).
+        // 왼쪽 위 주제 카드(추천 컨텐츠 · 베스트셀러).
         public SpotlightConfig spotlight = new SpotlightConfig();
 
         public static string Path => System.IO.Path.Combine(Application.streamingAssetsPath, FileName);

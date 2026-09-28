@@ -46,6 +46,9 @@ namespace StoryRest.ArUco
 
         public KeywordWallConfig KeywordConfig { get; private set; }
 
+        /// <summary>이번 실행이 띄운 키워드 월들. 설정창이 값을 바꾼 뒤 ApplyConfig 를 돌리는 데 쓴다.</summary>
+        public IReadOnlyList<KeywordWall> Walls => _walls;
+
         /// <summary>월의 그림 텍스처(떠다니는 스프라이트 + 주제 카드 그림). 월이 있을 때만 만들어지고 월 화면들이 함께 쓴다.</summary>
         public KeywordSpriteCache Sprites { get; private set; }
 
@@ -55,6 +58,18 @@ namespace StoryRest.ArUco
         /// <summary>관람 기록 링크. aruco 역할이면 서버, wall 역할이면 클라이언트, all 이면 둘 다 null.</summary>
         public ViewStatsServer StatsServer { get; private set; }
         public ViewStatsClient StatsClient { get; private set; }
+
+        [Header("씬에 미리 놓아 둔 화면들 (→ ARCHITECTURE §3)")]
+        [Tooltip("씬에 미리 만들어 둔 ArUco 세트들(ArUcoSet.prefab 인스턴스). aruco.json 의 sets[] 중 이 층·역할 것을 " +
+                 "순서대로 하나씩 맡기고, 남는 것은 끈다. 설정이 더 많이 요구하면 씬에 하나 더 놓아야 한다.")]
+        [SerializeField] ArUcoSet[] _arUcoSets = new ArUcoSet[0];
+
+        [Tooltip("씬에 미리 만들어 둔 키워드 월들(KeywordWall.prefab 인스턴스). keywordwall.json 의 walls[] 중 이 층·역할 것을 " +
+                 "순서대로 하나씩 맡기고, 남는 것은 끈다. 자리·글꼴·색은 여기서 직접 잡는다.")]
+        [SerializeField] KeywordWall[] _keywordWalls = new KeywordWall[0];
+
+        [Tooltip("Assets/9.Prefab/StatsTrafficPanel.prefab — ESC 설정창 오른쪽에 서는 TCP 패널.")]
+        [SerializeField] ViewStatsTrafficPanel _trafficPanelPrefab;
 
         readonly List<string> _problems = new List<string>();
         readonly List<ArUcoSet> _sets = new List<ArUcoSet>();
@@ -96,25 +111,57 @@ namespace StoryRest.ArUco
             LogSummary();
             CreateSets();
             CreateKeywordWalls();
+            SleepUnusedScreens();
             CreateStatsLink();
             AttachSettingsPanel();
         }
 
         /// <summary>
+        /// 씬에 미리 놓아 둔 화면 중 이번 실행이 맡기지 않은 것을 끈다. 켜 둔 채 두면 카메라가 0번 디스플레이에
+        /// 검은 화면을 덮어 그린다. 월 PC(wall)에서는 세트 전부, 세트가 하나뿐인 층에서는 두 번째 세트가 여기서 꺼진다.
+        /// </summary>
+        void SleepUnusedScreens()
+        {
+            foreach (var set in _arUcoSets)
+                if (set != null && !_sets.Contains(set)) set.gameObject.SetActive(false);
+
+            foreach (var wall in _keywordWalls)
+                if (wall != null && !_walls.Contains(wall)) wall.gameObject.SetActive(false);
+        }
+
+        /// <summary>
         /// ESC 설정창(씬에 있는 SettingsPanelUI)에 현장 조절값과 층·역할 줄을 덧붙인다.
         /// 세트가 없는 월 PC 에서도 층·역할은 바꿀 수 있어야 하므로 역할과 무관하게 붙인다. 창이 없는 씬이면 조용히 건너뛴다.
+        ///
+        /// 판을 만드는 쪽(ArUcoSettingsPanel)은 **씬에 미리 붙여 둔다** — 줄 원본 프리팹을 인스펙터에서 물려야 하기 때문이다.
+        /// TCP 패널은 판 자체가 프리팹이라 여기서 복제한다.
         /// </summary>
         void AttachSettingsPanel()
         {
             var settingsUi = FindObjectOfType<SettingsPanelUI>(true);
-            if (settingsUi == null) return;
+            if (settingsUi == null || settingsUi.PanelRoot == null) return;
 
-            if (GetComponent<ArUcoSettingsPanel>() == null)
-                gameObject.AddComponent<ArUcoSettingsPanel>().Attach(settingsUi);
+            var rows = GetComponent<ArUcoSettingsPanel>();
+            if (rows == null)
+                Debug.LogError("[StoryRest] 씬의 StoryRestApp 에 ArUcoSettingsPanel 이 없어 현장 조절 줄을 띄우지 못합니다.");
+            else
+                rows.Attach(settingsUi);
 
             // 관람 기록 링크의 연결 상태 · 송수신 로그. 설정창과 같이 열리고 닫히며 오른쪽에 따로 선다.
-            if (GetComponent<ViewStatsTrafficPanel>() == null)
-                gameObject.AddComponent<ViewStatsTrafficPanel>().Attach(settingsUi);
+            if (_trafficPanelPrefab == null)
+            {
+                Debug.LogError("[StoryRest] StoryRestApp 에 TCP 패널 프리팹이 안 물려 있습니다. " +
+                               "Assets/9.Prefab/StatsTrafficPanel.prefab 을 넣으세요.");
+                return;
+            }
+
+            Instantiate(_trafficPanelPrefab, settingsUi.PanelRoot.transform.parent).Attach(this, settingsUi);
+        }
+
+        /// <summary>월 설정을 keywordwall.json 에 쓴다. ESC 설정창의 월 항목이 바뀔 때 부른다.</summary>
+        public void SaveKeywordConfig()
+        {
+            if (KeywordConfig != null) KeywordWallConfig.Save(KeywordConfig);
         }
 
         /// <summary>이번 실행에서 실제로 만드는 세트. 월 PC(wall)면 비어 있다.</summary>
@@ -152,8 +199,10 @@ namespace StoryRest.ArUco
                     break;
             }
 
-            // 링크 상태 패널(F7). all 에서도 붙여 "통신 없음" 을 보여 준다 — 역할을 잘못 잡은 것을 여기서 알아챈다.
-            gameObject.AddComponent<ViewStatsLinkPanel>();
+            // 링크 상태 패널(F7). all 에서도 보여 준다 — 역할을 잘못 잡은 것을 여기서 알아챈다.
+            // 판 프리팹을 인스펙터에서 물려야 하므로 씬에 미리 붙여 둔다.
+            if (GetComponent<ViewStatsLinkPanel>() == null)
+                Debug.LogError("[StoryRest] 씬의 StoryRestApp 에 ViewStatsLinkPanel 이 없어 F7 링크 상태를 띄우지 못합니다.");
         }
 
         /// <summary>
@@ -224,12 +273,26 @@ namespace StoryRest.ArUco
             if (KeywordConfig.spotlight.enabled)
                 Spotlight = new KeywordSpotlight(KeywordConfig.spotlight, Settings.ContentRoot);
 
-            for (int i = 0; i < walls.Count; i++)
+            int wallCount = walls.Count;
+            if (wallCount > _keywordWalls.Length)
             {
-                var go = new GameObject($"KeywordWall_{walls[i].displayIndex}");
-                go.transform.SetParent(transform, false);
+                _problems.Add($"이 층·역할은 키워드 월이 {wallCount}개 필요한데 씬에는 {_keywordWalls.Length}개뿐입니다. " +
+                              "StartScene 의 StoryRestApp 아래에 KeywordWall 프리팹을 하나 더 놓고 Inspector 의 Keyword Walls 에 이어 주세요. " +
+                              $"앞의 {_keywordWalls.Length}개만 띄웁니다.");
+                Debug.LogError($"[Keyword] {_problems[_problems.Count - 1]}");
+                wallCount = _keywordWalls.Length;
+            }
 
-                var wall = go.AddComponent<KeywordWall>();
+            for (int i = 0; i < wallCount; i++)
+            {
+                var wall = _keywordWalls[i];
+                if (wall == null)
+                {
+                    Debug.LogError($"[Keyword] StoryRestApp 의 Keyword Walls[{i}] 가 비어 있습니다.");
+                    continue;
+                }
+
+                wall.gameObject.SetActive(true);
                 wall.Setup(KeywordConfig, entries, useSprites ? Sprites : null, walls[i].displayIndex, i);
                 if (Spotlight != null) wall.AttachSpotlight(Spotlight, Sprites);
                 _walls.Add(wall);
@@ -255,12 +318,24 @@ namespace StoryRest.ArUco
             // 그래서 에디터에서만 화면을 가로로 나눠 모든 세트를 한 번에 띄운다.
             bool splitPreview = Application.isEditor && Config.editorPreview && count > 1;
 
+            if (count > _arUcoSets.Length)
+            {
+                _problems.Add($"이 층은 ArUco 세트가 {count}개 필요한데 씬에는 {_arUcoSets.Length}개뿐입니다. " +
+                              "StartScene 의 StoryRestApp 아래에 ArUcoSet 프리팹을 하나 더 놓고 Inspector 의 ArUco Sets 에 이어 주세요. " +
+                              $"앞의 {_arUcoSets.Length}개만 띄웁니다.");
+                Debug.LogError($"[ArUco] {_problems[_problems.Count - 1]}");
+                count = _arUcoSets.Length;
+            }
+
             for (int i = 0; i < count; i++)
             {
                 var setConfig = active[i];
-
-                var go = new GameObject($"Set_{setConfig.name}");
-                go.transform.SetParent(transform, false);
+                var set = _arUcoSets[i];
+                if (set == null)
+                {
+                    Debug.LogError($"[ArUco] StoryRestApp 의 ArUco Sets[{i}] 가 비어 있습니다.");
+                    continue;
+                }
 
                 Rect viewport = splitPreview
                     ? new Rect(i / (float)count, 0f, 1f / count, 1f)
@@ -268,7 +343,7 @@ namespace StoryRest.ArUco
 
                 int displayIndex = splitPreview ? 0 : setConfig.displayIndex;
 
-                var set = go.AddComponent<ArUcoSet>();
+                set.gameObject.SetActive(true);
                 set.Initialize(Config, setConfig, Content, Images, Settings.floor, i, viewport, displayIndex);
                 _sets.Add(set);
             }

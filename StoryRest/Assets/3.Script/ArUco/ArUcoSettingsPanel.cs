@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using StoryRest.Keyword;
 using UnityEngine.UI;
 
 namespace StoryRest.ArUco
@@ -8,8 +9,9 @@ namespace StoryRest.ArUco
     /// <summary>
     /// ESC 설정창(SettingsPanelUI)에 현장에서 조절할 값들의 줄을 덧붙인다.
     ///
-    /// 씬의 설정창은 인스펙터로 토글 두 개를 이어 둔 작은 판이다. 줄을 씬에 손으로 만들어 잇는 대신
-    /// 실행할 때 코드로 만들어 붙인다 — 항목이 늘어도 씬을 건드리지 않고, 값 범위와 설명이 코드 한 곳에 남는다.
+    /// 줄의 **모양**은 프리팹이 정하고(`Assets/9.Prefab/SettingsRows.prefab` → SettingsRowTemplates),
+    /// 줄의 **개수와 내용**은 여기서 정한다 — 역할에 따라 ArUco 줄이 통째로 빠지므로 씬에 다 그려 둘 수 없다.
+    /// 값 범위와 설명이 코드 한 곳에 남는 것도 그대로다(→ ARCHITECTURE §3).
     ///
     /// 여기 두는 값의 기준: 설치자가 현장에서 "느낌으로" 맞추는 것. 카메라 번호나 디스플레이 배정처럼
     /// 한 번 정하면 끝나는 값은 aruco.json 을 직접 고치는 편이 낫다(잘못 건드리면 화면이 사라진다).
@@ -21,18 +23,16 @@ namespace StoryRest.ArUco
     public class ArUcoSettingsPanel : MonoBehaviour
     {
         const float SaveDelay = 1f;
-        const float PanelWidth = 680f;
+
+        [Tooltip("Assets/9.Prefab/SettingsRows.prefab — 줄의 모양. 글꼴·색·폭을 여기서 잡는다.")]
+        [SerializeField] SettingsRowTemplates rowTemplates;
 
         StoryRestApp _app;
         SettingsPanelUI _ui;
 
-        Font _font;
-        int _fontSize = 18;
-        Color _textColor = Color.white;
-        Toggle _toggleTemplate;
-
         bool _syncing;
-        bool _dirty;
+        bool _dirty;          // aruco.json 에 쓸 것이 있다
+        bool _keywordDirty;   // keywordwall.json 에 쓸 것이 있다
         float _dirtySince;
 
         Text _restartNote;
@@ -52,12 +52,17 @@ namespace StoryRest.ArUco
             _app = GetComponent<StoryRestApp>();
             _ui = ui;
 
-            var root = ui.PanelRoot;
+            var root = ui != null ? ui.PanelRoot : null;
             if (_app == null || root == null) return;
 
-            BorrowStyle(root);
-            ResizePanel(root);
-            BuildRows(root.transform);
+            if (rowTemplates == null || !rowTemplates.IsComplete)
+            {
+                Debug.LogError("[ArUco] 설정창 줄 원본이 비어 있습니다. 씬의 StoryRestApp > ArUcoSettingsPanel 에 " +
+                               "Assets/9.Prefab/SettingsRows.prefab 을 넣고 안의 원본들을 이어 주세요.");
+                return;
+            }
+
+            BuildRows(ui.RowsRoot);
 
             _ui.VisibilityChanged += OnVisibilityChanged;
             SyncFromConfig();
@@ -70,14 +75,14 @@ namespace StoryRest.ArUco
 
         void Update()
         {
-            if (_dirty && Time.unscaledTime - _dirtySince >= SaveDelay) Save();
+            if ((_dirty || _keywordDirty) && Time.unscaledTime - _dirtySince >= SaveDelay) Save();
         }
 
         void OnVisibilityChanged(bool visible)
         {
             // 열 때: 편집모드(P 키 등)가 바꿔 둔 값을 따라잡는다. 닫을 때: 기다리지 않고 바로 저장한다.
             if (visible) SyncFromConfig();
-            else if (_dirty) Save();
+            else if (_dirty || _keywordDirty) Save();
         }
 
         // ── 값 ↔ UI ──────────────────────────────────────────────────────────
@@ -99,10 +104,24 @@ namespace StoryRest.ArUco
             _dirtySince = Time.unscaledTime;
         }
 
+        // 월 값이 바뀌었다. 살아 있는 월에 알리고, 짝 값(min/max)을 맞춘 뒤라 다른 줄의 표시도 다시 읽는다.
+        void KeywordChanged()
+        {
+            if (_syncing) return;
+
+            for (int i = 0; i < _app.Walls.Count; i++) _app.Walls[i].ApplyConfig();
+
+            _keywordDirty = true;
+            _dirtySince = Time.unscaledTime;
+            SyncFromConfig();
+        }
+
         void Save()
         {
+            if (_dirty) _app.SaveConfig();
+            if (_keywordDirty) _app.SaveKeywordConfig();
             _dirty = false;
-            _app.SaveConfig();
+            _keywordDirty = false;
         }
 
         // ── 줄 구성 ───────────────────────────────────────────────────────────
@@ -110,7 +129,99 @@ namespace StoryRest.ArUco
         void BuildRows(Transform parent)
         {
             if (AppSettings.HasArUco(_app.RunningRole)) BuildArUcoRows(parent);
+            if (AppSettings.HasWall(_app.RunningRole)) BuildKeywordRows(parent);
             BuildSettingRows(parent);
+        }
+
+        // 키워드 월(→ keywordwall.json). 살아 있는 월이 같은 설정 객체를 보고 있어 바꾸는 즉시 따라온다 —
+        // 시간·속도는 매 프레임, 크기·수명·투명도는 다음에 태어나는 낱말부터. 개수만 시작할 때 정해져 재시작이 필요하다.
+        void BuildKeywordRows(Transform parent)
+        {
+            var wall = _app.KeywordConfig;
+            var spot = wall != null ? wall.spotlight : null;
+            if (spot == null) return;
+
+            Header(parent, "키워드 월 — 추천 카드 (바꾸면 바로 적용 · keywordwall.json 에 저장)");
+
+            ToggleRow(parent, "추천 카드 상시 노출  spotlight.alwaysOn",
+                () => spot.alwaysOn, v => spot.alwaysOn = v, keyword: true);
+
+            FloatRow(parent, "카드 뜨는 간격  spotlight.intervalSeconds", 15f, 300f, 5f, "0",
+                () => spot.intervalSeconds, v => spot.intervalSeconds = v,
+                "한 장이 뜨고 다음 장이 뜰 때까지(초). 상시 노출이면 쓰지 않는다.", keyword: true);
+
+            FloatRow(parent, "카드 떠 있는 시간  spotlight.cardSeconds", 2f, 60f, 1f, "0",
+                () => spot.cardSeconds,
+                v =>
+                {
+                    spot.cardSeconds = v;
+                    spot.fadeSeconds = Mathf.Min(spot.fadeSeconds, v * 0.5f);
+                },
+                "완전히 보이는 시간(초). 페이드는 이 값의 절반을 넘지 못한다.", keyword: true);
+
+            FloatRow(parent, "카드 페이드  spotlight.fadeSeconds", 0f, 3f, 0.1f, "0.0",
+                () => spot.fadeSeconds, v => spot.fadeSeconds = Mathf.Min(v, spot.cardSeconds * 0.5f),
+                "나타나고 사라지는 데 걸리는 시간(초).", keyword: true);
+
+            ToggleRow(parent, "제목 아래 주제 이름  spotlight.showTopicName",
+                () => spot.showTopicName, v => spot.showTopicName = v, keyword: true);
+
+            FloatRow(parent, "순위 다시 세는 주기  spotlight.refreshSeconds", 5f, 300f, 5f, "0",
+                () => spot.refreshSeconds, v => spot.refreshSeconds = v,
+                "관람 기록을 다시 읽어 카드 목록을 갱신하는 주기(초). 기록이 한 건 적힐 때도 다시 센다.", keyword: true);
+
+            Header(parent, "키워드 월 — 떠다니는 낱말·그림");
+
+            IntRow(parent, "한 화면 개수  maxOnScreen", 1, 40,
+                () => wall.maxOnScreen, v => wall.maxOnScreen = v,
+                "동시에 떠 있는 개수. 시작할 때 만들어지므로 재시작해야 적용.", applyToSets: false, keyword: true);
+
+            FloatRow(parent, "속도 최소  minSpeed", 0.005f, 0.15f, 0.005f, "0.000",
+                () => wall.minSpeed, v => wall.minSpeed = Mathf.Min(v, wall.maxSpeed),
+                "화면 짧은 변을 1 로 본 초당 이동량. 다음에 태어나는 것부터.", keyword: true);
+            FloatRow(parent, "속도 최대  maxSpeed", 0.005f, 0.15f, 0.005f, "0.000",
+                () => wall.maxSpeed, v => wall.maxSpeed = Mathf.Max(v, wall.minSpeed), null, keyword: true);
+
+            FloatRow(parent, "투명도 최소  minAlpha", 0f, 1f, 0.05f, "0.00",
+                () => wall.minAlpha, v => wall.minAlpha = Mathf.Min(v, wall.maxAlpha),
+                "옅은 것과 진한 것이 섞여야 배경처럼 깔린다.", keyword: true);
+            FloatRow(parent, "투명도 최대  maxAlpha", 0f, 1f, 0.05f, "0.00",
+                () => wall.maxAlpha, v => wall.maxAlpha = Mathf.Max(v, wall.minAlpha), null, keyword: true);
+
+            FloatRow(parent, "머무는 시간 최소  minLifetime", 3f, 120f, 1f, "0",
+                () => wall.minLifetime, v => wall.minLifetime = Mathf.Min(v, wall.maxLifetime),
+                "하나가 떠 있는 시간(초). 지나면 사라지고 다른 것이 나온다.", keyword: true);
+            FloatRow(parent, "머무는 시간 최대  maxLifetime", 3f, 120f, 1f, "0",
+                () => wall.maxLifetime, v => wall.maxLifetime = Mathf.Max(v, wall.minLifetime), null, keyword: true);
+
+            FloatRow(parent, "나타나고 사라지는 시간  fadeSeconds", 0f, 5f, 0.1f, "0.0",
+                () => wall.fadeSeconds, v => wall.fadeSeconds = v,
+                "카드가 뜨기 이만큼 전에 그 자리의 낱말이 먼저 빠진다.", keyword: true);
+
+            FloatRow(parent, "낱말 글자 최소  minFontSize", 16f, 200f, 2f, "0",
+                () => wall.minFontSize, v => wall.minFontSize = Mathf.Min(v, wall.maxFontSize),
+                "낱말 모드(keywords.txt)일 때. 1920x1200 기준 픽셀.", keyword: true);
+            FloatRow(parent, "낱말 글자 최대  maxFontSize", 16f, 200f, 2f, "0",
+                () => wall.maxFontSize, v => wall.maxFontSize = Mathf.Max(v, wall.minFontSize), null, keyword: true);
+
+            FloatRow(parent, "그림 크기 최소  minSpriteSize", 100f, 1200f, 10f, "0",
+                () => wall.minSpriteSize, v => wall.minSpriteSize = Mathf.Min(v, wall.maxSpriteSize),
+                "스프라이트 모드일 때 긴 변(1920x1200 기준 픽셀).", keyword: true);
+            FloatRow(parent, "그림 크기 최대  maxSpriteSize", 100f, 1200f, 10f, "0",
+                () => wall.maxSpriteSize, v => wall.maxSpriteSize = Mathf.Max(v, wall.minSpriteSize), null, keyword: true);
+
+            FloatRow(parent, "서로 밀어내는 세기  separation", 0f, 2f, 0.1f, "0.0",
+                () => wall.separation, v => wall.separation = v,
+                "겹쳤을 때 벌어지는 속도. 0 = 안 밀어냄. 너무 크면 튕기듯 움직인다.", keyword: true);
+
+            FloatRow(parent, "가장자리 여백  edgeMargin", 0f, 0.2f, 0.01f, "0.00",
+                () => wall.edgeMargin, v => wall.edgeMargin = v,
+                "화면 비율. 렌즈 왜곡이 크거나 모서리가 벽에 걸리면 올린다.", keyword: true);
+
+            ToggleRow(parent, "같은 것 두 개 안 띄움  avoidDuplicates",
+                () => wall.avoidDuplicates, v => wall.avoidDuplicates = v, keyword: true);
+
+            Note(parent, $"설정 파일: {KeywordWallConfig.Path}   (자리·크기·글꼴은 씬의 KeywordWall_A/B 에서)");
         }
 
         void BuildArUcoRows(Transform parent)
@@ -268,20 +379,24 @@ namespace StoryRest.ArUco
                   $"재시작해야 적용됩니다 (지금은 {running})</color>";
         }
 
-        // ── 위젯 ──────────────────────────────────────────────────────────────
+        // ── 위젯 — 원본을 복제해 값만 물린다 ──────────────────────────────────
 
         void FloatRow(Transform parent, string label, float min, float max, float step, string format,
-                      Func<float> get, Action<float> set, string help)
+                      Func<float> get, Action<float> set, string help, bool keyword = false)
         {
-            var row = Row(parent, label, help);
-            var slider = Slider(row, false, min, max);
-            var value = ValueText(row);
+            var row = Row(parent, rowTemplates.sliderRow, label, help);
+            var slider = row.slider;
+            var value = row.value;
+
+            slider.wholeNumbers = false;
+            slider.minValue = min;
+            slider.maxValue = max;
 
             void Sync()
             {
                 float v = get();
                 slider.SetValueWithoutNotify(v);
-                value.text = v.ToString(format);
+                if (value != null) value.text = v.ToString(format);
             }
 
             slider.onValueChanged.AddListener(raw =>
@@ -290,24 +405,28 @@ namespace StoryRest.ArUco
                 float v = Mathf.Round(raw / step) * step;   // 눈금에 맞춰 잡음을 없앤다
                 set(v);
                 Sync();
-                Changed();
+                if (keyword) KeywordChanged(); else Changed();
             });
 
             _syncers.Add(Sync);
         }
 
         void IntRow(Transform parent, string label, int min, int max,
-                    Func<int> get, Action<int> set, string help, bool applyToSets = true)
+                    Func<int> get, Action<int> set, string help, bool applyToSets = true, bool keyword = false)
         {
-            var row = Row(parent, label, help);
-            var slider = Slider(row, true, min, max);
-            var value = ValueText(row);
+            var row = Row(parent, rowTemplates.sliderRow, label, help);
+            var slider = row.slider;
+            var value = row.value;
+
+            slider.wholeNumbers = true;
+            slider.minValue = min;
+            slider.maxValue = max;
 
             void Sync()
             {
                 int v = get();
                 slider.SetValueWithoutNotify(v);
-                value.text = v.ToString();
+                if (value != null) value.text = v.ToString();
             }
 
             slider.onValueChanged.AddListener(raw =>
@@ -315,20 +434,19 @@ namespace StoryRest.ArUco
                 if (_syncing) return;
                 set(Mathf.RoundToInt(raw));
                 Sync();
-                if (applyToSets) Changed();
+                if (keyword) KeywordChanged(); else if (applyToSets) Changed();
             });
 
             _syncers.Add(Sync);
         }
 
-        void ToggleRow(Transform parent, string label, Func<bool> get, Action<bool> set)
+        void ToggleRow(Transform parent, string label, Func<bool> get, Action<bool> set, bool applyToSets = true,
+                       bool keyword = false)
         {
-            var toggle = Instantiate(_toggleTemplate, parent);
-            toggle.name = "Toggle_" + label;
-            toggle.onValueChanged.RemoveAllListeners();
+            var row = Row(parent, rowTemplates.toggleRow, label, null);
+            var toggle = row.toggle;
 
-            var text = toggle.GetComponentInChildren<Text>();
-            if (text != null) text.text = label;
+            toggle.onValueChanged.RemoveAllListeners();
 
             void Sync() => toggle.SetIsOnWithoutNotify(get());
 
@@ -336,7 +454,7 @@ namespace StoryRest.ArUco
             {
                 if (_syncing) return;
                 set(v);
-                Changed();
+                if (keyword) KeywordChanged(); else if (applyToSets) Changed();
             });
 
             _syncers.Add(Sync);
@@ -345,8 +463,12 @@ namespace StoryRest.ArUco
         void DropdownRow(Transform parent, string label, string[] options, string help,
                          Func<int> get, Action<int> set)
         {
-            var row = Row(parent, label, help);
-            var dropdown = Dropdown(row, options);
+            var row = Row(parent, rowTemplates.dropdownRow, label, help);
+            var dropdown = row.dropdown;
+
+            dropdown.onValueChanged.RemoveAllListeners();
+            dropdown.ClearOptions();
+            dropdown.AddOptions(new List<string>(options));
 
             void Sync() => dropdown.SetValueWithoutNotify(Mathf.Clamp(get(), 0, options.Length - 1));
 
@@ -360,308 +482,42 @@ namespace StoryRest.ArUco
             _syncers.Add(Sync);
         }
 
-        // uGUI Dropdown 은 목록 템플릿(Template > Viewport > Content > Item(Toggle))이 있어야 열린다.
-        // 씬에 드롭다운이 없어 빌려 올 것이 없으므로 기본 프리팹과 같은 구조를 코드로 만든다.
-        Dropdown Dropdown(RectTransform row, string[] options)
+        /// <summary>원본을 복제해 이름과 도움말을 넣는다. 도움말은 이름 아래 작은 글씨로 한 줄 더 붙는다.</summary>
+        SettingsRow Row(Transform parent, SettingsRow template, string label, string help)
         {
-            const float itemHeight = 26f;
+            var row = Instantiate(template, parent);
+            row.gameObject.SetActive(true);
+            row.name = "Row_" + label;
 
-            var go = new GameObject("Dropdown", typeof(RectTransform));
-            go.transform.SetParent(row, false);
+            if (row.label != null)
+            {
+                row.label.text = string.IsNullOrEmpty(help)
+                    ? label
+                    : $"{label}\n<size=13><color=#aaaaaa>{help}</color></size>";
+            }
 
-            // 슬라이더 + 값 칸과 같은 폭을 차지해 다른 줄과 오른쪽 끝이 맞는다.
-            var element = go.AddComponent<LayoutElement>();
-            element.preferredWidth = 286f;
-            element.preferredHeight = itemHeight;
+            // 도움말이 없는 줄은 한 줄 높이면 된다. 있으면 두 줄이라 원본 높이를 그대로 쓴다.
+            var element = row.GetComponent<LayoutElement>();
+            if (element != null && string.IsNullOrEmpty(help)) element.preferredHeight = 28f;
 
-            var background = go.AddComponent<Image>();
-            background.color = new Color(1f, 1f, 1f, 0.15f);
-
-            var caption = Label(go.transform, "Label", TextAnchor.MiddleLeft);
-            Stretch(caption.rectTransform, new Vector2(10f, 2f), new Vector2(-28f, -2f));
-
-            var arrow = Label(go.transform, "Arrow", TextAnchor.MiddleCenter);
-            arrow.text = "▼";
-            arrow.fontSize = _fontSize - 6;
-            arrow.rectTransform.anchorMin = new Vector2(1f, 0f);
-            arrow.rectTransform.anchorMax = new Vector2(1f, 1f);
-            arrow.rectTransform.sizeDelta = new Vector2(24f, 0f);
-            arrow.rectTransform.anchoredPosition = new Vector2(-14f, 0f);
-
-            // ── 목록 템플릿 (닫혀 있을 때는 꺼 둔다. Dropdown 이 열 때 복제한다) ──
-            var template = new GameObject("Template", typeof(RectTransform)).GetComponent<RectTransform>();
-            template.SetParent(go.transform, false);
-            template.anchorMin = new Vector2(0f, 0f);
-            template.anchorMax = new Vector2(1f, 0f);
-            template.pivot = new Vector2(0.5f, 1f);
-            template.anchoredPosition = new Vector2(0f, 2f);
-            template.sizeDelta = new Vector2(0f, itemHeight * options.Length + 14f);
-
-            var templateImage = template.gameObject.AddComponent<Image>();
-            templateImage.color = new Color(0.12f, 0.12f, 0.12f, 0.98f);
-
-            var viewport = new GameObject("Viewport", typeof(RectTransform)).GetComponent<RectTransform>();
-            viewport.SetParent(template, false);
-            Stretch(viewport, new Vector2(4f, 4f), new Vector2(-4f, -4f));
-            viewport.pivot = new Vector2(0f, 1f);
-
-            viewport.gameObject.AddComponent<Image>().color = Color.white;
-            viewport.gameObject.AddComponent<Mask>().showMaskGraphic = false;
-
-            var content = new GameObject("Content", typeof(RectTransform)).GetComponent<RectTransform>();
-            content.SetParent(viewport, false);
-            content.anchorMin = new Vector2(0f, 1f);
-            content.anchorMax = new Vector2(1f, 1f);
-            content.pivot = new Vector2(0.5f, 1f);
-            content.sizeDelta = new Vector2(0f, itemHeight);
-
-            var item = new GameObject("Item", typeof(RectTransform)).GetComponent<RectTransform>();
-            item.SetParent(content, false);
-            item.anchorMin = new Vector2(0f, 0.5f);
-            item.anchorMax = new Vector2(1f, 0.5f);
-            item.sizeDelta = new Vector2(0f, itemHeight);
-
-            var itemBackground = Image(item, "Item Background", Color.white);
-            Stretch(itemBackground.rectTransform, Vector2.zero, Vector2.zero);
-
-            var itemCheck = Image(item, "Item Checkmark", new Color(0.35f, 0.7f, 1f, 1f));
-            itemCheck.rectTransform.anchorMin = itemCheck.rectTransform.anchorMax = new Vector2(0f, 0.5f);
-            itemCheck.rectTransform.sizeDelta = new Vector2(8f, 8f);
-            itemCheck.rectTransform.anchoredPosition = new Vector2(12f, 0f);
-
-            var itemLabel = Label(item, "Item Label", TextAnchor.MiddleLeft);
-            Stretch(itemLabel.rectTransform, new Vector2(24f, 1f), new Vector2(-10f, -1f));
-
-            var toggle = item.gameObject.AddComponent<Toggle>();
-            toggle.targetGraphic = itemBackground;
-            toggle.graphic = itemCheck;
-            toggle.isOn = true;
-
-            // 항목 바탕은 흰 판에 알파만 곱한다 — 평소엔 거의 비치고 마우스를 올리면 밝아진다.
-            var colors = toggle.colors;
-            colors.normalColor = new Color(1f, 1f, 1f, 0.06f);
-            colors.highlightedColor = new Color(1f, 1f, 1f, 0.3f);
-            colors.selectedColor = new Color(1f, 1f, 1f, 0.3f);
-            colors.pressedColor = new Color(1f, 1f, 1f, 0.45f);
-            toggle.colors = colors;
-
-            var scroll = template.gameObject.AddComponent<ScrollRect>();
-            scroll.content = content;
-            scroll.viewport = viewport;
-            scroll.horizontal = false;
-            scroll.movementType = ScrollRect.MovementType.Clamped;
-
-            template.gameObject.SetActive(false);
-
-            var dropdown = go.AddComponent<Dropdown>();
-            dropdown.targetGraphic = background;
-            dropdown.template = template;
-            dropdown.captionText = caption;
-            dropdown.itemText = itemLabel;
-
-            dropdown.options.Clear();
-            for (int i = 0; i < options.Length; i++) dropdown.options.Add(new Dropdown.OptionData(options[i]));
-
-            return dropdown;
-        }
-
-        Text Label(Transform parent, string name, TextAnchor anchor)
-        {
-            var go = new GameObject(name, typeof(RectTransform));
-            go.transform.SetParent(parent, false);
-
-            var text = go.AddComponent<Text>();
-            ApplyTextStyle(text);
-            text.alignment = anchor;
-            text.horizontalOverflow = HorizontalWrapMode.Overflow;
-            return text;
-        }
-
-        RectTransform Row(Transform parent, string label, string help)
-        {
-            var go = new GameObject("Row_" + label, typeof(RectTransform));
-            go.transform.SetParent(parent, false);
-
-            var layout = go.AddComponent<HorizontalLayoutGroup>();
-            layout.spacing = 10f;
-            layout.childAlignment = TextAnchor.MiddleLeft;
-            layout.childControlWidth = true;
-            layout.childControlHeight = true;
-            layout.childForceExpandWidth = false;
-            layout.childForceExpandHeight = false;
-
-            var element = go.AddComponent<LayoutElement>();
-            element.preferredHeight = string.IsNullOrEmpty(help) ? 28f : 44f;
-
-            // 라벨 + 도움말은 세로로 쌓아 한 줄 안에 둔다.
-            var textGo = new GameObject("Label", typeof(RectTransform));
-            textGo.transform.SetParent(go.transform, false);
-
-            var text = textGo.AddComponent<Text>();
-            ApplyTextStyle(text);
-            text.alignment = TextAnchor.MiddleLeft;
-            text.text = string.IsNullOrEmpty(help)
-                ? label
-                : $"{label}\n<size={_fontSize - 5}><color=#aaaaaa>{help}</color></size>";
-
-            var textElement = textGo.AddComponent<LayoutElement>();
-            textElement.flexibleWidth = 1f;
-
-            return go.GetComponent<RectTransform>();
-        }
-
-        Text ValueText(RectTransform row)
-        {
-            var go = new GameObject("Value", typeof(RectTransform));
-            go.transform.SetParent(row, false);
-
-            var text = go.AddComponent<Text>();
-            ApplyTextStyle(text);
-            text.alignment = TextAnchor.MiddleRight;
-
-            var element = go.AddComponent<LayoutElement>();
-            element.preferredWidth = 56f;
-
-            return text;
-        }
-
-        Slider Slider(RectTransform row, bool wholeNumbers, float min, float max)
-        {
-            var go = new GameObject("Slider", typeof(RectTransform));
-            go.transform.SetParent(row, false);
-
-            var element = go.AddComponent<LayoutElement>();
-            element.preferredWidth = 220f;
-            element.preferredHeight = 20f;
-
-            var background = Image(go.transform, "Background", new Color(1f, 1f, 1f, 0.15f));
-            Stretch(background.rectTransform, new Vector2(0f, 6f), new Vector2(0f, -6f));
-
-            var fillArea = new GameObject("Fill Area", typeof(RectTransform)).GetComponent<RectTransform>();
-            fillArea.SetParent(go.transform, false);
-            Stretch(fillArea, new Vector2(6f, 6f), new Vector2(-6f, -6f));
-
-            var fill = Image(fillArea, "Fill", new Color(0.35f, 0.7f, 1f, 0.9f));
-            Stretch(fill.rectTransform, Vector2.zero, Vector2.zero);
-
-            var handleArea = new GameObject("Handle Slide Area", typeof(RectTransform)).GetComponent<RectTransform>();
-            handleArea.SetParent(go.transform, false);
-            Stretch(handleArea, new Vector2(8f, 0f), new Vector2(-8f, 0f));
-
-            var handle = Image(handleArea, "Handle", Color.white);
-            handle.rectTransform.sizeDelta = new Vector2(16f, 0f);
-
-            var slider = go.AddComponent<Slider>();
-            slider.targetGraphic = handle;
-            slider.fillRect = fill.rectTransform;
-            slider.handleRect = handle.rectTransform;
-            slider.direction = UnityEngine.UI.Slider.Direction.LeftToRight;
-            slider.minValue = min;
-            slider.maxValue = max;
-            slider.wholeNumbers = wholeNumbers;
-
-            return slider;
+            return row;
         }
 
         void Header(Transform parent, string text)
         {
-            var go = new GameObject("Header", typeof(RectTransform));
-            go.transform.SetParent(parent, false);
-
-            var label = go.AddComponent<Text>();
-            ApplyTextStyle(label);
-            label.fontStyle = FontStyle.Bold;
-            label.alignment = TextAnchor.LowerLeft;
+            var label = Instantiate(rowTemplates.header, parent);
+            label.gameObject.SetActive(true);
+            label.name = "Header";
             label.text = text;
-
-            var element = go.AddComponent<LayoutElement>();
-            element.preferredHeight = 34f;
         }
 
         Text Note(Transform parent, string text)
         {
-            var go = new GameObject("Note", typeof(RectTransform));
-            go.transform.SetParent(parent, false);
-
-            var label = go.AddComponent<Text>();
-            ApplyTextStyle(label);
-            label.fontSize = _fontSize - 4;
-            label.color = new Color(0.75f, 0.75f, 0.75f, 1f);
-            label.alignment = TextAnchor.MiddleLeft;
-            label.horizontalOverflow = HorizontalWrapMode.Wrap;
+            var label = Instantiate(rowTemplates.note, parent);
+            label.gameObject.SetActive(true);
+            label.name = "Note";
             label.text = text;
-
-            var element = go.AddComponent<LayoutElement>();
-            element.preferredHeight = 22f;
-
             return label;
-        }
-
-        Image Image(Transform parent, string name, Color color)
-        {
-            var go = new GameObject(name, typeof(RectTransform));
-            go.transform.SetParent(parent, false);
-
-            var image = go.AddComponent<Image>();
-            image.color = color;
-            return image;
-        }
-
-        static void Stretch(RectTransform rect, Vector2 offsetMin, Vector2 offsetMax)
-        {
-            rect.anchorMin = Vector2.zero;
-            rect.anchorMax = Vector2.one;
-            rect.offsetMin = offsetMin;
-            rect.offsetMax = offsetMax;
-        }
-
-        void ApplyTextStyle(Text text)
-        {
-            text.font = _font;
-            text.fontSize = _fontSize;
-            text.color = _textColor;
-            text.supportRichText = true;
-            text.raycastTarget = false;
-        }
-
-        // 씬 판의 글꼴·크기·토글 모양을 그대로 빌려 쓴다. 새 줄만 다른 모양이면 덧붙인 티가 난다.
-        void BorrowStyle(GameObject root)
-        {
-            _toggleTemplate = root.GetComponentInChildren<Toggle>(true);
-
-            var sample = _toggleTemplate != null ? _toggleTemplate.GetComponentInChildren<Text>(true) : null;
-            if (sample == null) sample = root.GetComponentInChildren<Text>(true);
-
-            if (sample != null)
-            {
-                _font = sample.font;
-                _fontSize = sample.fontSize;
-                _textColor = sample.color;
-            }
-
-            if (_font == null) _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        }
-
-        // 판은 토글 두 개 크기로 고정되어 있다. 줄이 늘어난 만큼 높이가 따라오게 하고 폭을 넓힌다.
-        static void ResizePanel(GameObject root)
-        {
-            var rect = root.GetComponent<RectTransform>();
-            rect.sizeDelta = new Vector2(PanelWidth, rect.sizeDelta.y);
-
-            if (root.GetComponent<ContentSizeFitter>() == null)
-            {
-                var fitter = root.AddComponent<ContentSizeFitter>();
-                fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-                fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-            }
-
-            var layout = root.GetComponent<VerticalLayoutGroup>();
-            if (layout != null)
-            {
-                layout.childControlWidth = true;
-                layout.childControlHeight = true;
-                layout.childForceExpandHeight = false;
-            }
         }
     }
 }

@@ -14,6 +14,10 @@ namespace StoryRest.Keyword
     /// 낱말과 스프라이트는 "무엇을 그리는가" 만 다르다. 항목 하나가 TMP_Text 나 RawImage 중 하나를 갖고,
     /// 움직임·겹침·페이드는 같은 코드를 탄다. 어느 쪽인지는 Setup 에 스프라이트 캐시가 왔는지로 정해진다.
     ///
+    /// **화면은 프리팹이 만든다**(→ ARCHITECTURE §3 "UI는 uGUI로 고정한다"). 카메라·캔버스·주제 카드·항목 원본이
+    /// 다 프리팹 안에 있고, 이 스크립트는 그것들을 받아 움직이기만 한다. 자리·크기·글꼴·색을 바꾸려면
+    /// 코드가 아니라 `Assets/9.Prefab/KeywordWall.prefab` 을 연다 — 에디터에서 보면서 잡을 수 있다.
+    ///
     /// 좌표는 화면을 0~1 로 보는 정규화 값이다. 해상도가 다른 프로젝터를 물려도 같은 그림이 나온다.
     /// </summary>
     [DisallowMultipleComponent]
@@ -21,12 +25,6 @@ namespace StoryRest.Keyword
     {
         // ArUco 세트 카메라와 겹치지 않도록 반대 방향으로 떨어뜨린다.
         const float WallSeparation = -10000f;
-
-        // 글자·그림 크기(픽셀)와 개수는 이 해상도를 기준으로 정한 값이다. 실제 화면이 다르면 통째로 배율을 맞춘다.
-        // 두 프로젝터 해상도가 달라도(또는 창이 작아도) 같은 그림이 나오게 하기 위해서다 — 픽셀 그대로 두면
-        // 작은 화면에서는 같은 낱말 16개가 들어갈 자리가 없어 서로 밀어내며 겹치고 떨린다.
-        // 월 프로젝터는 16:10 이다(→ SPEC §3.1). 에디터에서 볼 때는 Game 뷰 비율도 16:10 으로 맞춘다.
-        static readonly Vector2 ReferenceResolution = new Vector2(1920f, 1200f);
 
         class Item
         {
@@ -60,6 +58,24 @@ namespace StoryRest.Keyword
             public bool active;
         }
 
+        [Header("화면 — 프리팹 안의 조각들")]
+        [SerializeField] Camera _camera;
+        [SerializeField] Canvas _canvas;
+
+        [Tooltip("떠다니는 것들이 들어갈 자리. 크기 기준(1920x1200 등)은 캔버스의 CanvasScaler 가 정한다.")]
+        [SerializeField] RectTransform _canvasRect;
+        [SerializeField] RectTransform _itemRoot;
+
+        [Header("떠다니는 것 원본 — 꺼진 자리에 두고 복제해 쓴다")]
+        [Tooltip("낱말 모드에서 쓸 원본. 글꼴·정렬·외곽선을 여기서 잡는다(글자 크기와 색은 항목마다 설정에서 뽑는다).")]
+        [SerializeField] TMP_Text _wordTemplate;
+
+        [Tooltip("스프라이트 모드에서 쓸 원본. 크기는 항목마다 설정에서 뽑는다.")]
+        [SerializeField] KeywordGradientImage _spriteTemplate;
+
+        [Header("왼쪽 위 주제 카드")]
+        [SerializeField] KeywordSpotlightView _spotlight;
+
         KeywordWallConfig _config;
         List<string> _words;
         List<KeywordMotion> _motions;
@@ -69,16 +85,10 @@ namespace StoryRest.Keyword
         // null 이면 낱말 모드. 있으면 _words 가 스프라이트 파일 경로 목록이다.
         KeywordSpriteCache _sprites;
 
-        // 왼쪽 위 주제 카드. 없을 수 있다(설정에서 끔).
-        KeywordSpotlightView _spotlight;
-
         // 카드가 차지하는 자리(화면 0~1). 카드가 떠 있을 때만 _reserved 에 들어가고, 없을 때는 낱말들이 화면 전체를 쓴다.
         Rect _cardArea;
         Rect _reserved;
         bool _reservedActive;
-
-        Camera _camera;
-        RectTransform _canvasRect;
 
         readonly List<Item> _items = new List<Item>();
         readonly HashSet<string> _onScreen = new HashSet<string>();
@@ -97,7 +107,10 @@ namespace StoryRest.Keyword
             _colors = config.ResolveColors();
             _gradients = config.ResolveSpriteGradients();
 
-            BuildScreen(displayIndex, wallIndex);
+            if (!BindScreen(displayIndex, wallIndex)) return;
+
+            // 카드를 안 쓰는 설정이면 프리팹에 있던 카드를 통째로 끈다. AttachSpotlight 가 오면 다시 켠다.
+            if (_spotlight != null && !config.spotlight.enabled) _spotlight.gameObject.SetActive(false);
 
             if (_words == null || _words.Count == 0)
             {
@@ -121,17 +134,28 @@ namespace StoryRest.Keyword
         }
 
         /// <summary>
-        /// 왼쪽 위에 주제 카드를 붙인다. Setup 뒤에 부른다.
-        /// 카드는 낱말들보다 나중에 만들어져 위에 그려진다. 자리 비우기는 카드가 뜰 때 UpdateReserved 가 한다.
+        /// 프리팹에 들어 있는 주제 카드에 재료를 물린다. Setup 뒤에 부른다.
+        /// 카드가 낱말들 위에 그려지도록 프리팹에서 Spotlight 를 Items 아래에 두었다.
+        /// 자리 비우기는 카드가 뜰 때 UpdateReserved 가 한다.
         /// </summary>
         public void AttachSpotlight(KeywordSpotlight model, KeywordSpriteCache cache)
         {
-            if (_canvasRect == null || model == null) return;
+            if (_canvasRect == null || _spotlight == null || model == null) return;
+
+            _spotlight.gameObject.SetActive(true);
 
             // 첫 장도 그 자리의 낱말이 먼저 사라진 뒤에 뜨도록 낱말 페이드 시간만큼 늦춘다.
-            _spotlight = new KeywordSpotlightView(_config.spotlight, _config, model, cache, _config.fadeSeconds + 0.5f);
-            _spotlight.Build(_canvasRect);
-            _cardArea = _spotlight.ReservedArea(_canvasRect.rect.size);
+            _spotlight.Bind(_config, model, cache, _config.fadeSeconds + 0.5f);
+            _cardArea = _spotlight.ReservedArea(_canvasRect);
+        }
+
+        /// <summary>
+        /// ESC 설정창에서 값이 바뀐 뒤 부른다. 대부분의 값은 매 프레임·다음 등장 때 읽으므로 따로 할 일이 없고,
+        /// 한 번만 읽는 것(주제 줄 켜기)만 다시 맞춘다. 개수(maxOnScreen)와 폴더 수는 시작할 때 정해져 재시작해야 한다.
+        /// </summary>
+        public void ApplyConfig()
+        {
+            if (_spotlight != null) _spotlight.ApplyConfig();
         }
 
         /// <summary>
@@ -163,54 +187,46 @@ namespace StoryRest.Keyword
             }
         }
 
-        void BuildScreen(int displayIndex, int wallIndex)
+        /// <summary>
+        /// 프리팹으로 들어온 카메라·캔버스를 이번 화면에 맞춘다. 무엇을 만들지는 프리팹이 이미 정했고,
+        /// 여기서 정하는 것은 "어느 프로젝터로 나가는가" 와 세트 카메라에 걸리지 않을 자리뿐이다.
+        /// </summary>
+        bool BindScreen(int displayIndex, int wallIndex)
         {
-            var cameraGo = new GameObject($"KeywordCamera{wallIndex}");
-            cameraGo.transform.SetParent(transform, false);
-            cameraGo.transform.position = new Vector3(0f, (wallIndex + 1) * WallSeparation, 0f);
+            var template = _sprites != null ? (Component)_spriteTemplate : _wordTemplate;
 
-            _camera = cameraGo.AddComponent<Camera>();
+            if (_camera == null || _canvas == null || _canvasRect == null || _itemRoot == null || template == null)
+            {
+                Debug.LogError($"[Keyword] 월 프리팹의 연결이 비었습니다({name}). " +
+                               "Assets/9.Prefab/KeywordWall.prefab 의 KeywordWall 컴포넌트에서 " +
+                               "카메라·캔버스·Items·항목 원본을 이어 주세요.");
+                return false;
+            }
+
+            // ArUco 세트 카메라와 겹치지 않도록, 월끼리도 겹치지 않도록 떨어뜨린다.
+            transform.position = new Vector3(0f, (wallIndex + 1) * WallSeparation, 0f);
+
             _camera.targetDisplay = Mathf.Max(0, displayIndex);
-            _camera.clearFlags = CameraClearFlags.SolidColor;
-            _camera.backgroundColor = _config.backgroundColor;
-            _camera.orthographic = true;
-            _camera.nearClipPlane = 0.1f;
-            _camera.farClipPlane = 100f;
-            _camera.allowHDR = false;
-            _camera.allowMSAA = false;
-
-            var canvasGo = new GameObject($"KeywordCanvas{wallIndex}", typeof(Canvas), typeof(CanvasScaler));
-            canvasGo.transform.SetParent(cameraGo.transform, false);
-
-            var canvas = canvasGo.GetComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceCamera;
-            canvas.worldCamera = _camera;
-            canvas.planeDistance = 1f;
-
-            var scaler = canvasGo.GetComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = ReferenceResolution;
-            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
-            scaler.matchWidthOrHeight = 0.5f;
-
-            _canvasRect = canvasGo.GetComponent<RectTransform>();
+            _canvas.worldCamera = _camera;
 
             // 캔버스 크기는 다음 레이아웃 때에야 정해진다. 지금 바로 낱말을 놓으려면 먼저 한 번 갱신해 두어야
             // 첫 낱말들의 크기(halfSize)가 실제 화면 기준으로 계산된다. 안 그러면 전부 대충값으로 태어난다.
             Canvas.ForceUpdateCanvases();
+            return true;
         }
 
+        /// <summary>
+        /// 떠다니는 것 하나를 만든다. 모양은 프리팹의 원본이 정하고, 여기서는 복제해 자리만 잡는다.
+        /// </summary>
         Item CreateItem(int index)
         {
-            var go = new GameObject($"Keyword{index}", typeof(RectTransform));
-            go.transform.SetParent(_canvasRect, false);
-
             var item = new Item();
 
             if (_sprites != null)
             {
-                var image = go.AddComponent<KeywordGradientImage>();
-                image.raycastTarget = false;
+                var image = Instantiate(_spriteTemplate, _itemRoot);
+                image.gameObject.SetActive(true);
+                image.name = $"Keyword{index}";
                 image.enabled = false;   // 텍스처가 올 때까지
 
                 item.image = image;
@@ -219,29 +235,32 @@ namespace StoryRest.Keyword
             }
             else
             {
-                var label = go.AddComponent<TextMeshProUGUI>();
-                label.raycastTarget = false;
-                label.alignment = TextAlignmentOptions.Center;
-                label.enableWordWrapping = false;
+                var label = Instantiate(_wordTemplate, _itemRoot);
+                label.gameObject.SetActive(true);
+                label.name = $"Keyword{index}";
 
                 item.label = label;
                 item.graphic = label;
                 item.rect = label.rectTransform;
             }
 
+            // 자리는 매 프레임 코드가 계산한다(→ Apply). 그 계산은 "캔버스 가운데가 원점" 을 전제하므로
+            // 앵커·피벗만은 프리팹 값을 따르지 않고 가운데로 고정한다.
             item.rect.anchorMin = item.rect.anchorMax = item.rect.pivot = new Vector2(0.5f, 0.5f);
+            item.rect.localScale = Vector3.one;
             return item;
         }
 
         void Update()
         {
-            if (_canvasRect == null) return;
+            // 씬에 미리 놓인 채 아직 Setup 을 못 받았으면(StoryRestApp 이 없는 씬 등) 아무것도 하지 않는다.
+            if (_config == null || _canvasRect == null) return;
 
             // 배경 화면이라 게임 시간 흐름(GameManager 의 timeScale)에 영향받지 않아야 한다.
             float dt = Time.unscaledDeltaTime;
 
             // 카드는 낱말이 하나도 없어도 돈다.
-            _spotlight?.Tick(dt);
+            if (_spotlight != null) _spotlight.Tick(dt);
             UpdateReserved();
 
             if (_items.Count == 0) return;
@@ -272,35 +291,48 @@ namespace StoryRest.Keyword
         }
 
         /// <summary>항목의 글자 상자가 사각형(화면 0~1)에 걸치는가.</summary>
-        static bool Overlaps(Item item, Rect area)
+        static bool Overlaps(Item item, Rect area) => OverlapsArea(item.position, item.halfSize, area);
+
+        /// <summary>가운데가 center, 반크기가 halfSize 인 상자가 사각형(화면 0~1)에 걸치는가.</summary>
+        static bool OverlapsArea(Vector2 center, Vector2 halfSize, Rect area)
         {
             if (area.width <= 0f || area.height <= 0f) return false;
 
-            return item.position.x - item.halfSize.x < area.xMax
-                && item.position.x + item.halfSize.x > area.xMin
-                && item.position.y - item.halfSize.y < area.yMax
-                && item.position.y + item.halfSize.y > area.yMin;
+            return center.x - halfSize.x < area.xMax
+                && center.x + halfSize.x > area.xMin
+                && center.y - halfSize.y < area.yMax
+                && center.y + halfSize.y > area.yMin;
         }
 
         /// <summary>
-        /// 카드 자리에 들어온 항목을 가까운 변으로 밀어낸다. 낱말끼리 밀어내는 것과 같은 세기로 서서히.
-        /// 카드가 왼쪽 위 모서리에 있으므로 실제로는 오른쪽 아니면 아래로 나간다.
+        /// 카드 자리에 들어온 항목을 가장 가까운 변으로 밀어낸다. 낱말끼리 밀어내는 것과 같은 세기로 서서히.
+        /// 카드를 프리팹에서 어디에 두든(한가운데여도) 맞는 방향으로 나간다.
         /// </summary>
         void KeepOutOfReserved(Item item, float dt)
         {
             if (!Overlaps(item, _reserved)) return;
 
-            float pushRight = _reserved.xMax - (item.position.x - item.halfSize.x);
-            float pushDown = _reserved.yMax - (item.position.y - item.halfSize.y);
-            float push = Mathf.Max(_config.separation, 0.2f) * dt;
+            // 네 방향 각각, 빠져나가려면 얼마나 가야 하는가. y 는 아래로 증가한다.
+            float toLeft = (item.position.x + item.halfSize.x) - _reserved.xMin;
+            float toRight = _reserved.xMax - (item.position.x - item.halfSize.x);
+            float toTop = (item.position.y + item.halfSize.y) - _reserved.yMin;
+            float toBottom = _reserved.yMax - (item.position.y - item.halfSize.y);
 
-            Vector2 direction = pushRight < pushDown ? Vector2.right : Vector2.up;   // y 는 아래로 증가
+            float least = Mathf.Min(Mathf.Min(toLeft, toRight), Mathf.Min(toTop, toBottom));
+
+            Vector2 direction;
+            if (least == toLeft) direction = Vector2.left;
+            else if (least == toRight) direction = Vector2.right;
+            else if (least == toTop) direction = Vector2.down;     // 화면 위쪽으로
+            else direction = Vector2.up;                            // 화면 아래쪽으로
+
+            float push = Mathf.Max(_config.separation, 0.2f) * dt;
             item.position += direction * push;
             item.center += direction * push;
 
             // 직선으로 오는 것은 방향도 꺾어 준다. 안 그러면 매 프레임 밀어내는 것과 들어오려는 것이 맞서 떨린다.
-            if (direction.x > 0f && item.velocity.x < 0f) item.velocity.x = -item.velocity.x;
-            if (direction.y > 0f && item.velocity.y < 0f) item.velocity.y = -item.velocity.y;
+            if (direction.x * item.velocity.x < 0f) item.velocity.x = -item.velocity.x;
+            if (direction.y * item.velocity.y < 0f) item.velocity.y = -item.velocity.y;
         }
 
         /// <summary>
@@ -631,10 +663,8 @@ namespace StoryRest.Keyword
                     Random.Range(limit.x, 1f - limit.x),
                     Random.Range(limit.y, 1f - limit.y));
 
-                // 카드 자리는 후보에서 뺀다. 마지막 시도까지 못 피했으면 아래에서 밀려 나간다.
-                if (_reserved.width > 0f && attempt < 11
-                    && candidate.x - self.halfSize.x < _reserved.xMax && candidate.y - self.halfSize.y < _reserved.yMax)
-                    continue;
+                // 카드 자리는 후보에서 뺀다. 마지막 시도까지 못 피했으면 KeepOutOfReserved 가 밀어낸다.
+                if (attempt < 11 && OverlapsArea(candidate, self.halfSize, _reserved)) continue;
 
                 float clearance = float.MaxValue;
 
