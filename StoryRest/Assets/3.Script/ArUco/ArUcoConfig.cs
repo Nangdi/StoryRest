@@ -334,6 +334,10 @@ namespace StoryRest.ArUco
         // 0 = 즉시 반응(떨림 많음), 1 에 가까울수록 부드럽지만 늦게 따라온다.
         public float smoothing = 0.4f;
 
+        // 정지 고정 문턱(카메라 픽셀). 마커 네 꼭짓점이 모두 이 안에서만 흔들리면 자리를 잠근다.
+        // smoothing 은 떨림을 늦출 뿐 없애지 못한다 — 가만히 놓인 책자가 흔들려 보이면 이 값을 올린다. 0 = 끔.
+        public float stillThresholdPixels = 2f;
+
         // 마커를 놓쳤을 때 콘텐츠를 몇 초 더 붙잡아 둘지. 손이 스칠 때의 깜빡임을 막는다.
         public float holdSeconds = 0.3f;
 
@@ -370,6 +374,11 @@ namespace StoryRest.ArUco
         // 20초 — 책장을 넘기거나 옆 사람과 얘기하다 돌아오는 시간을 넉넉히 덮는다. 그보다 길면
         // 다음 관람객이 앞사람이 보던 중간부터 보게 되고 그 사람은 세어지지 않는다.
         public float viewResumeGraceSeconds = 20f;
+
+        // 영상이 끝나면 돌아갈 시각(초) — 도입부 + 반복 구간으로 만든 영상의 반복 구간 시작(→ SPEC §5).
+        // 모든 영상을 같은 틀로 만들므로 여기 한 값으로 맞춘다. 파일 이름의 "_loop<초>" 가 있으면 그 영상만 그 값을 쓴다.
+        // 0 = 처음으로 돌아가는 평범한 루프. 영상 길이보다 긴 값이면 그 영상은 처음으로 돌아간다.
+        public float videoLoopStartSeconds = 2.4167f;   // 2초 10프레임 @24fps
 
         // 관람을 파일로 남길지. persistentDataPath/stats/ 에 날짜별 CSV 로 쌓인다.
         public bool recordViews = true;
@@ -478,6 +487,8 @@ namespace StoryRest.ArUco
             }
 
             smoothing = Mathf.Clamp(smoothing, 0f, 0.99f);
+            videoLoopStartSeconds = Mathf.Max(0f, videoLoopStartSeconds);
+            stillThresholdPixels = Mathf.Clamp(stillThresholdPixels, 0f, 20f);
             holdSeconds = Mathf.Max(0f, holdSeconds);
             warpSubdivisions = Mathf.Clamp(warpSubdivisions, 1, 32);
             maxSimultaneous = Mathf.Max(0, maxSimultaneous);

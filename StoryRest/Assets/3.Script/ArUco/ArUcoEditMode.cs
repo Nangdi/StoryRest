@@ -144,6 +144,9 @@ namespace StoryRest.ArUco
         // Set.Update 가 화면을 채운 뒤에 그 위로 편집 UI 를 얹는다.
         void LateUpdate()
         {
+            // 설정창에 숫자를 치는 동안에는 단축키를 받지 않는다(Backspace 가 보정값을 지운다).
+            if (UiTyping.IsTyping) return;
+
             if (Input.GetKeyDown(toggleKey)) SetActive(!_active);
             if (Input.GetKeyDown(debugPreviewKey)) ToggleDebugPreview();
 

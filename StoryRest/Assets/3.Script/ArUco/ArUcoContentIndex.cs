@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using System.Text.RegularExpressions;
 using UnityEngine;
 
 namespace StoryRest.ArUco
@@ -34,6 +36,12 @@ namespace StoryRest.ArUco
 
         /// <summary>보정값을 찾는 키(→ MarkerConfig.items[].file). 파일 이름이라 사람이 읽을 수 있다.</summary>
         public string fileName;
+
+        /// <summary>
+        /// 이 영상만 따로 정한 반복 구간 시작(초). 파일 이름의 "_loop5.75" 에서 읽는다.
+        /// 0 이면 표시가 없는 것 — 전체 기본값(ArUcoConfig.videoLoopStartSeconds)을 쓴다(→ SPEC §5).
+        /// </summary>
+        public float loopStart;
 
         public bool IsVideo => kind == ContentKind.Video;
     }
@@ -360,7 +368,25 @@ namespace StoryRest.ArUco
                 kind = kind,
                 path = path,
                 fileName = Path.GetFileName(path),
+                loopStart = kind == ContentKind.Video ? ParseLoopStart(path) : 0f,
             };
+        }
+
+        // 파일 이름 끝의 "_loop5.75" 를 읽는다. 앞 구분자는 _ - 공백 무엇이든, 대소문자 무관.
+        static readonly Regex LoopTag = new Regex(@"(?:^|[_\-\s])loop(\d+(?:\.\d+)?)$",
+                                                  RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// 파일 이름의 반복 구간 시작(초). 표시가 없으면 0 — 처음으로 돌아가는 평범한 루프다(→ SPEC §5).
+        /// </summary>
+        public static float ParseLoopStart(string path)
+        {
+            var match = LoopTag.Match(Path.GetFileNameWithoutExtension(path));
+            if (!match.Success) return 0f;
+
+            return float.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float seconds)
+                ? Mathf.Max(0f, seconds)
+                : 0f;
         }
     }
 }

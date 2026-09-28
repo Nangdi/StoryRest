@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using UnityEngine;
 using StoryRest.Keyword;
@@ -228,7 +229,7 @@ namespace StoryRest.ArUco
         {
             var config = _app.Config;
 
-            Header(parent, "ArUco — 현장 조절값 (바꾸면 바로 적용 · aruco.json 에 저장)");
+            Header(parent, "ArUco — 현장 조절값 (바꾸면 바로 적용 · aruco.json 에 저장 · 오른쪽 숫자를 누르면 직접 입력)");
 
             FloatRow(parent, "콘텐츠 유지  holdSeconds", 0f, 2f, 0.05f, "0.00",
                 () => config.holdSeconds, v => config.holdSeconds = v,
@@ -245,6 +246,14 @@ namespace StoryRest.ArUco
             FloatRow(parent, "움직임 부드럽게  smoothing", 0f, 0.95f, 0.05f, "0.00",
                 () => config.smoothing, v => config.smoothing = v,
                 "0 = 즉시 반응(떨림), 클수록 부드럽지만 늦게 따라온다.");
+
+            FloatRow(parent, "영상 반복 시작  videoLoopStartSeconds", 0f, 60f, 0.05f, "0.000",
+                () => config.videoLoopStartSeconds, v => config.videoLoopStartSeconds = v,
+                "영상이 끝나면 이 초로 돌아간다(도입부는 한 번만) · 0 = 처음으로. 파일 이름 _loop<초> 가 있으면 그게 우선.");
+
+            FloatRow(parent, "정지 고정  stillThresholdPixels", 0f, 10f, 0.5f, "0.0",
+                () => config.stillThresholdPixels, v => config.stillThresholdPixels = v,
+                "가만히 있는 마커의 떨림을 없앤다. 이 픽셀 안의 흔들림은 무시 · 0 = 끔. 그래도 떨리면 올린다.");
 
             IntRow(parent, "동시 표시 마커 수  maxSimultaneous", 0, 8,
                 () => config.maxSimultaneous, v => config.maxSimultaneous = v,
@@ -386,7 +395,7 @@ namespace StoryRest.ArUco
         {
             var row = Row(parent, rowTemplates.sliderRow, label, help);
             var slider = row.slider;
-            var value = row.value;
+            var input = ValueInput(row, InputField.ContentType.DecimalNumber);
 
             slider.wholeNumbers = false;
             slider.minValue = min;
@@ -396,16 +405,26 @@ namespace StoryRest.ArUco
             {
                 float v = get();
                 slider.SetValueWithoutNotify(v);
-                if (value != null) value.text = v.ToString(format);
+                ShowValue(row, input, v.ToString(format, CultureInfo.InvariantCulture));
+            }
+
+            void Apply(float v)
+            {
+                set(Mathf.Clamp(v, min, max));
+                Sync();
+                if (keyword) KeywordChanged(); else Changed();
             }
 
             slider.onValueChanged.AddListener(raw =>
             {
                 if (_syncing) return;
-                float v = Mathf.Round(raw / step) * step;   // 눈금에 맞춰 잡음을 없앤다
-                set(v);
-                Sync();
-                if (keyword) KeywordChanged(); else Changed();
+                Apply(Mathf.Round(raw / step) * step);   // 눈금에 맞춰 잡음을 없앤다
+            });
+
+            // 직접 친 값은 눈금에 맞추지 않는다 — 슬라이더로 못 맞추는 값을 넣으려고 치는 것이다.
+            input?.onEndEdit.AddListener(text =>
+            {
+                if (TryParseNumber(text, out float v)) Apply(v); else Sync();
             });
 
             _syncers.Add(Sync);
@@ -416,7 +435,7 @@ namespace StoryRest.ArUco
         {
             var row = Row(parent, rowTemplates.sliderRow, label, help);
             var slider = row.slider;
-            var value = row.value;
+            var input = ValueInput(row, InputField.ContentType.IntegerNumber);
 
             slider.wholeNumbers = true;
             slider.minValue = min;
@@ -426,15 +445,25 @@ namespace StoryRest.ArUco
             {
                 int v = get();
                 slider.SetValueWithoutNotify(v);
-                if (value != null) value.text = v.ToString();
+                ShowValue(row, input, v.ToString(CultureInfo.InvariantCulture));
+            }
+
+            void Apply(int v)
+            {
+                set(Mathf.Clamp(v, min, max));
+                Sync();
+                if (keyword) KeywordChanged(); else if (applyToSets) Changed();
             }
 
             slider.onValueChanged.AddListener(raw =>
             {
                 if (_syncing) return;
-                set(Mathf.RoundToInt(raw));
-                Sync();
-                if (keyword) KeywordChanged(); else if (applyToSets) Changed();
+                Apply(Mathf.RoundToInt(raw));
+            });
+
+            input?.onEndEdit.AddListener(text =>
+            {
+                if (TryParseNumber(text, out float v)) Apply(Mathf.RoundToInt(v)); else Sync();
             });
 
             _syncers.Add(Sync);
@@ -483,6 +512,56 @@ namespace StoryRest.ArUco
         }
 
         /// <summary>원본을 복제해 이름과 도움말을 넣는다. 도움말은 이름 아래 작은 글씨로 한 줄 더 붙는다.</summary>
+        /// <summary>
+        /// 슬라이더 옆 숫자를 직접 칠 수 있게 한다. 슬라이더 눈금으로는 5.75 같은 값을 정확히 못 맞춘다.
+        /// 원본 줄에 입력칸(row.input)이 있으면 그걸 쓰고, 없으면 숫자 글자(row.value)에 입력칸을 붙인다 —
+        /// 프리팹을 고치지 않아도 모든 슬라이더 줄이 입력을 받는다.
+        /// </summary>
+        static InputField ValueInput(SettingsRow row, InputField.ContentType contentType)
+        {
+            var input = row.input;
+
+            if (input == null && row.value != null)
+            {
+                input = row.value.gameObject.AddComponent<InputField>();
+                input.textComponent = row.value;
+                input.targetGraphic = row.value;
+
+                // 글자가 클릭을 받아야 입력칸이 잡힌다.
+                row.value.raycastTarget = true;
+                row.value.supportRichText = false;
+            }
+
+            if (input == null) return null;
+
+            input.contentType = contentType;
+            input.lineType = InputField.LineType.SingleLine;
+            input.caretWidth = 2;
+            input.selectionColor = new Color(1f, 0.84f, 0.2f, 0.45f);
+            return input;
+        }
+
+        static void ShowValue(SettingsRow row, InputField input, string text)
+        {
+            if (input != null)
+            {
+                // 치는 중인 글자를 덮어쓰지 않는다. 다른 줄이 바뀌어 전체 Sync 가 돌 때도 마찬가지다.
+                if (!input.isFocused) input.SetTextWithoutNotify(text);
+            }
+            else if (row.value != null)
+            {
+                row.value.text = text;
+            }
+        }
+
+        // 쉼표를 소수점으로 치는 경우도 받아 준다(5,75).
+        static bool TryParseNumber(string text, out float value)
+        {
+            text = (text ?? "").Trim().Replace(',', '.');
+            return float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value)
+                   && !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
         SettingsRow Row(Transform parent, SettingsRow template, string label, string help)
         {
             var row = Instantiate(template, parent);

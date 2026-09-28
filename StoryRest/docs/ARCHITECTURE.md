@@ -370,6 +370,8 @@ ArUco PC 한 대가 세트 2개를 도는 구성에서 가장 크게 절약되�
 {
   "dictionaryId": 2,
   "smoothing": 0.4,
+  "stillThresholdPixels": 2.0,
+  "videoLoopStartSeconds": 2.4167,
   "holdSeconds": 0.3,
   "warpSubdivisions": 10,
   "perspectiveMapping": true,
@@ -439,6 +441,10 @@ ArUco PC 한 대가 세트 2개를 도는 구성에서 가장 크게 절약되�
 주제 줄만 다시 맞춘다), 1초 뒤 `keywordwall.json` 에 저장한다(`_keywordDirty`). ArUco 값과 저장 파일이 다르므로 더럽힘 플래그를 따로 둔다.
 `maxOnScreen` 은 시작할 때 항목을 만들므로 재시작해야 적용된다고 줄에 적어 둔다.
 
+슬라이더 줄의 오른쪽 숫자는 **입력칸**이다 — 눌러서 값을 직접 치면(Enter 또는 칸 밖을 누르면) 눈금에 맞추지 않고 그대로 들어간다.
+원본 줄에 `SettingsRow.input` 이 없으면 `ArUcoSettingsPanel.ValueInput` 이 숫자 글자에 `InputField` 를 붙인다.
+치는 동안에는 편집모드 단축키를 받지 않는다(`UiTyping.IsTyping` — Backspace·숫자·`.` 이 단축키와 겹친다).
+
 줄이 50개를 넘어 창(680×980)이 스크롤이다 — `SettingsPanel` › `Viewport` › `Content` 구조로, 줄은 `SettingsPanelUI.RowsRoot`(= Content)에 붙는다.
 
 | 줄 | 값 | 적용 |
@@ -447,6 +453,8 @@ ArUco PC 한 대가 세트 2개를 도는 구성에서 가장 크게 절약되�
 | 관람 최소 유지 | `viewMinDwellSeconds` | 즉시 |
 | 놓침 복귀 유예 | `viewResumeGraceSeconds` | 즉시 (영상 유지 + 관람 판정) |
 | 움직임 부드럽게 | `smoothing` | 즉시 |
+| 영상 반복 시작 | `videoLoopStartSeconds` | 다음 반복부터. 끝나면 이 초로 돌아간다(→ SPEC §5) |
+| 정지 고정 | `stillThresholdPixels` | 즉시. 네 꼭짓점이 모두 이 픽셀 안에서만 흔들리면 자리를 잠그고 검출값을 평균해 수렴시킨다. `smoothing` 은 떨림을 늦출 뿐이라 가만히 놓인 마커의 떨림은 이걸로 잡는다 |
 | 동시 표시 마커 수 | `maxSimultaneous` | 즉시 |
 | 원근 매핑 / 관람 기록 | `perspectiveMapping` / `recordViews` | 즉시 |
 | 등장 연출 켜기 / 연출 / 빛 고리 | `appear.enabled` / `appear.effect`(드롭다운) / `appear.ring` | 즉시 |
@@ -502,6 +510,15 @@ ArUcoContentLibrary
 - **놓침과 끝남을 나눈다**(→ SPEC §5 재생 정책). `EndFrame()` 에서 이번 프레임에 그려지지 않은 슬롯은
   `Pause()` 만 하고, `viewResumeGraceSeconds` 를 넘긴 슬롯만 반납한다(`Pause` + `Rewind`).
   다시 요청되면 `TryGetFrame` 이 `Play()` 로 그 자리에서 이어 튼다. 파일은 닫지 않는다 — 여는 비용을 아낀다.
+- **반복 구간**(→ SPEC §5): 기본은 `ArUcoConfig.videoLoopStartSeconds`. 파일 이름의 `_loop<초>` 를
+  `ArUcoContentIndex` 가 `ContentEntry.loopStart` 로 읽으면 그 영상만 그 값(`ArUcoSet.LoopStartOf`).
+  `KeepInLoop` 이 잇는다: 끝나기 두 프레임 전쯤 **멈추고**(`Pause`), 지금 프레임의 **다음 장면**에 해당하는
+  반복 구간 프레임(끝에서 k 프레임 앞 = loopStart 에서 k 프레임 앞)으로 `Seek`, 도착하면 `Play`.
+  Seek 동안은 반복 구간과 같은 장면이 멈춰 있을 뿐이고, 텍스처가 비면 직전 프레임으로 버틴다.
+  - 재생 중에 `Seek` 하면 도착 전에 끝에 닿아 AVPro 가 0초로 감긴 첫 장면이 비친다(깜빡임) — 그래서 먼저 멈춘다.
+  - AVPro 루프는 **켜 둔다.** 끄고 "끝나면 `Seek` + `Play`" 는 Media Foundation 이 끝난 영상의 `Play` 를
+    처음부터 다시 틀기로 받아 0초로 돌아간다. 틈을 놓쳐 0초로 감기면 같은 방법으로 되돌린다.
+  반납 시 `Rewind` 는 그대로 0초 — 새 관람은 도입부부터.
 - 오디오는 쓰지 않으므로 `AudioOutput`을 비활성화하고 볼륨 0으로 연다.
 - 슬롯은 **마커가 아니라 파일 경로로** 빌려준다. 한 마커가 영상을 두 개 가질 수 있기 때문이다.
 - AVPro 텍스처는 플랫폼에 따라 **상하 반전**될 수 있다.

@@ -173,6 +173,7 @@ namespace StoryRest.ArUco
 
             _tracker.DictionaryId = _config.dictionaryId;
             _tracker.Smoothing = _config.smoothing;
+            _tracker.StillThresholdPixels = _config.stillThresholdPixels;
             _tracker.HoldSeconds = _config.holdSeconds;
             _tracker.AutoScanIntervalFrames = _config.autoScanIntervalFrames;
         }
@@ -429,9 +430,13 @@ namespace StoryRest.ArUco
         /// 콘텐츠 한 장의 이번 프레임 텍스처. 영상과 이미지가 갈라지는 유일한 자리다.
         /// 아직 준비 전(영상 디코딩 / 이미지 로딩)이면 false 를 돌린다.
         /// </summary>
+        // 파일 이름에 "_loop<초>" 가 있으면 그 값, 없으면 전체 기본값(→ ArUcoConfig.videoLoopStartSeconds).
+        float LoopStartOf(ContentEntry entry)
+            => entry.loopStart > 0f ? entry.loopStart : _config.videoLoopStartSeconds;
+
         bool TryGetTexture(ContentEntry entry, out Texture texture, out bool flipV, out float aspect)
         {
-            if (entry.IsVideo) return _library.TryGetFrame(entry.path, out texture, out flipV, out aspect);
+            if (entry.IsVideo) return _library.TryGetFrame(entry.path, LoopStartOf(entry), out texture, out flipV, out aspect);
 
             // 이미지는 AVPro 를 거치지 않으므로 상하 반전이 없다.
             flipV = false;

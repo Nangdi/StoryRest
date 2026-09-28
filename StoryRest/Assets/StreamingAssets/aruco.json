@@ -1,6 +1,8 @@
 {
     "dictionaryId": 2,
     "smoothing": 0.4000000059604645,
+    "stillThresholdPixels": 2.0,
+    "videoLoopStartSeconds": 2.4167,
     "holdSeconds": 0.30000001192092898,
     "warpSubdivisions": 10,
     "perspectiveMapping": false,

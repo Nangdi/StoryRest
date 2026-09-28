@@ -19,6 +19,9 @@ namespace StoryRest.ArUco
         [Tooltip("슬라이더 오른쪽의 숫자.")]
         public Text value;
 
+        [Tooltip("숫자를 직접 치는 칸. 비워 두면 value 글자에 입력칸을 붙여 쓴다(→ ArUcoSettingsPanel.ValueInput).")]
+        public InputField input;
+
         public Dropdown dropdown;
         public Toggle toggle;
     }

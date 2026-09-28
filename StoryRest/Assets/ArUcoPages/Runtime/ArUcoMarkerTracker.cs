@@ -100,6 +100,21 @@ public class ArUcoMarkerTracker : MonoBehaviour
         public bool hasValue;
         public bool inLatestFrame;
 
+        // 정지 고정. 가만히 놓인 마커의 검출값은 매 프레임 1~2px 씩 흔들리는데, 스무딩은 이 흔들림을
+        // 늦게 따라갈 뿐 없애지 못한다. 그래서 흔들림 폭 안의 변화는 목표를 옮기지 않고 평균에만 더한다.
+        // 평균은 표본이 늘수록 참값으로 수렴하고 움직임도 1/n 로 줄어, 곧 완전히 멈춘다.
+        public Vector2 s0, s1, s2, s3;   // 고정된 뒤 들어온 검출값의 합
+        public int stillCount;           // 합에 들어간 표본 수. 0 이면 움직이는 중
+        public int moveFrames;           // 문턱을 넘은 연속 프레임 수(한 프레임짜리 튐은 무시)
+
+        public void BeginStill(in Vector2 r0, in Vector2 r1, in Vector2 r2, in Vector2 r3)
+        {
+            s0 = r0; s1 = r1; s2 = r2; s3 = r3;
+            stillCount = 1;
+            moveFrames = 0;
+            t0 = r0; t1 = r1; t2 = r2; t3 = r3;
+        }
+
         // 중심·기울기·크기는 따로 보간하지 않고 보간된 꼭짓점에서 다시 뽑는다.
         // 그래야 원근 모드와 회전 모드가 같은 자세를 가리키고, 각도 wrap 처리도 필요 없다.
         public void Recompute()
@@ -142,6 +157,9 @@ public class ArUcoMarkerTracker : MonoBehaviour
     public float Smoothing = 0.4f;
     [Tooltip("마커를 놓친 뒤 몇 초 더 붙잡아 둘지.")]
     public float HoldSeconds = 0.3f;
+    [Tooltip("정지 고정 문턱(카메라 픽셀). 네 꼭짓점이 모두 이 안에서만 흔들리면 가만히 있는 것으로 보고 자리를 잠근다.\n" +
+             "0 = 끔. 검출 떨림 폭보다 조금 크게(보통 1.5~3).")]
+    public float StillThresholdPixels = 2f;
 
     // 후보만 잡히고 인식이 안 될 때 전체 딕셔너리를 훑는 주기(프레임). 0 = 사용 안 함.\n
     // 인쇄한 마커의 딕셔너리를 모를 때만 켜는 진단 기능이다. 한 번에 100ms 넘게 걸린다.
@@ -741,18 +759,75 @@ public class ArUcoMarkerTracker : MonoBehaviour
                 _states[raw.id] = state;
             }
 
-            state.t0 = raw.c0; state.t1 = raw.c1; state.t2 = raw.c2; state.t3 = raw.c3;
-
             if (!state.hasValue)
             {
                 // 처음 잡힌 마커는 보간 없이 바로 자리를 잡아야 이미지가 화면 구석에서 날아오지 않는다.
                 state.c0 = raw.c0; state.c1 = raw.c1; state.c2 = raw.c2; state.c3 = raw.c3;
+                state.BeginStill(raw.c0, raw.c1, raw.c2, raw.c3);
                 state.hasValue = true;
+            }
+            else
+            {
+                UpdateTarget(state, raw);
             }
 
             state.lastSeenTime = now;
             state.inLatestFrame = true;
         }
+    }
+
+    // 고정된 자리의 평균에 더할 표본 수 상한. 이만큼 모이면(30fps 에서 2초) 더 이상 움직이지 않는다.
+    const int MaxStillSamples = 60;
+
+    // 한 번에 이만큼(문턱의 배수) 넘게 뛰면 튐이 아니라 실제로 옮긴 것이다. 기다리지 않고 바로 따라간다.
+    const float JumpFactor = 4f;
+
+    /// <summary>
+    /// 새 검출을 목표에 반영한다. 흔들림 폭 안이면 잠근 자리의 평균만 다듬고,
+    /// 넘으면 잠금을 풀고 검출값을 그대로 따라간다(→ 스무딩이 부드럽게 잇는다).
+    /// </summary>
+    void UpdateTarget(MarkerState state, in RawMarker raw)
+    {
+        float threshold = StillThresholdPixels;
+        if (threshold <= 0f)
+        {
+            state.t0 = raw.c0; state.t1 = raw.c1; state.t2 = raw.c2; state.t3 = raw.c3;
+            state.stillCount = 0;
+            return;
+        }
+
+        float deviation = Mathf.Max(
+            Mathf.Max(Vector2.Distance(raw.c0, state.t0), Vector2.Distance(raw.c1, state.t1)),
+            Mathf.Max(Vector2.Distance(raw.c2, state.t2), Vector2.Distance(raw.c3, state.t3)));
+
+        if (deviation <= threshold)
+        {
+            state.moveFrames = 0;
+
+            if (state.stillCount == 0)
+            {
+                // 움직이다 막 멈췄다. 여기서부터 평균을 새로 쌓는다.
+                state.BeginStill(raw.c0, raw.c1, raw.c2, raw.c3);
+                return;
+            }
+
+            if (state.stillCount >= MaxStillSamples) return;
+
+            state.s0 += raw.c0; state.s1 += raw.c1; state.s2 += raw.c2; state.s3 += raw.c3;
+            state.stillCount++;
+
+            float inv = 1f / state.stillCount;
+            state.t0 = state.s0 * inv; state.t1 = state.s1 * inv;
+            state.t2 = state.s2 * inv; state.t3 = state.s3 * inv;
+            return;
+        }
+
+        // 잠겨 있을 때 한 프레임만 튀는 오검출은 넘긴다. 두 프레임 연속이거나 크게 뛰면 진짜 움직임이다.
+        if (state.stillCount > 0 && deviation < threshold * JumpFactor && ++state.moveFrames < 2) return;
+
+        state.stillCount = 0;
+        state.moveFrames = 0;
+        state.t0 = raw.c0; state.t1 = raw.c1; state.t2 = raw.c2; state.t3 = raw.c3;
     }
 
     /// <summary>
