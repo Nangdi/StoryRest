@@ -131,7 +131,106 @@ namespace StoryRest.ArUco
         {
             if (AppSettings.HasArUco(_app.RunningRole)) BuildArUcoRows(parent);
             if (AppSettings.HasWall(_app.RunningRole)) BuildKeywordRows(parent);
+            BuildAssignmentRows(parent);
             BuildSettingRows(parent);
+        }
+
+        // ── 화면 · 카메라 배정 ────────────────────────────────────────────────
+
+        const int MinChoiceCount = 4;   // 장비가 아직 안 꽂혀 있어도 미리 고를 수 있게 최소 이만큼은 보여 준다
+
+        static readonly string[] LiveSetOptions = { "없음", "테이블 A", "테이블 B" };
+        static readonly string[] RankOptions = { "없음", "이번 달 호기심 1위", "이번 주 호기심 1위" };
+
+        /// <summary>
+        /// 어느 테이블(세트)이 어느 카메라 · 프로젝터를 쓰고, 어느 벽(월)이 어느 프로젝터 · 테이블을 받는지 고른다.
+        /// 이 층 · 역할에서 실제로 쓰는 것만 보인다. 카메라 · 디스플레이는 시작할 때 열리므로 재시작해야 적용된다.
+        /// 디스플레이는 Unity 의 Game 뷰처럼 1 부터 센다(디스플레이 1 = 내부 번호 0).
+        /// </summary>
+        void BuildAssignmentRows(Transform parent)
+        {
+            var displays = DisplayOptions();
+            bool any = false;
+
+            if (AppSettings.HasArUco(_app.RunningRole))
+            {
+                var cameras = CameraOptions();
+                foreach (var set in _app.Config.SetsForFloor(_app.RunningFloor))
+                {
+                    if (!any) Header(parent, "화면 · 카메라 배정 (바꾸면 재시작해야 적용 · 디스플레이는 1 부터)");
+                    any = true;
+
+                    var target = set;
+                    DropdownRow(parent, $"테이블 {target.name} 카메라  sets.{target.name}.camera.deviceId", cameras,
+                        "이 테이블을 비추는 카메라. 번호는 Windows 가 매긴 장치 순서다.",
+                        () => target.camera.deviceId,
+                        v => { target.camera.deviceId = v; Changed(); });
+
+                    DropdownRow(parent, $"테이블 {target.name} 프로젝터  sets.{target.name}.displayIndex", displays,
+                        "이 테이블 위로 콘텐츠를 쏘는 프로젝터.",
+                        () => target.displayIndex,
+                        v => { target.displayIndex = v; Changed(); });
+                }
+            }
+
+            if (AppSettings.HasWall(_app.RunningRole) && _app.KeywordConfig != null)
+            {
+                var walls = _app.KeywordConfig.WallsFor(_app.RunningFloor, _app.RunningRole);
+                for (int i = 0; i < walls.Count; i++)
+                {
+                    if (!any) Header(parent, "화면 · 카메라 배정 (바꾸면 재시작해야 적용 · 디스플레이는 1 부터)");
+                    any = true;
+
+                    var wall = walls[i];
+                    string label = $"월 {i + 1}";
+
+                    DropdownRow(parent, $"{label} 프로젝터  walls.displayIndex", displays,
+                        "이 벽을 비추는 프로젝터. 테이블 프로젝터와 겹치면 시작할 때 경고한다.",
+                        () => wall.displayIndex,
+                        v => { wall.displayIndex = v; KeywordChanged(); });
+
+                    DropdownRow(parent, $"{label} 이 받는 테이블  walls.liveSets", LiveSetOptions,
+                        "이 테이블에서 찍은 질문이 \"지금 누군가가 궁금해한 질문\" 으로 이 벽에 뜬다. 관람객이 마주 보는 벽으로.",
+                        () => wall.ShowsLiveFrom("A") ? 1 : wall.ShowsLiveFrom("B") ? 2 : 0,
+                        v => { wall.liveSets = v == 1 ? new[] { "A" } : v == 2 ? new[] { "B" } : new string[0]; KeywordChanged(); });
+
+                    DropdownRow(parent, $"{label} 순위 분류  walls.rank", RankOptions,
+                        "이 벽에만 뜨는 순위 분류.",
+                        () => RankIndex(wall.rank),
+                        v => { wall.rank = v == 1 ? "month" : v == 2 ? "week" : ""; KeywordChanged(); });
+                }
+            }
+
+            if (any) Note(parent, "바꾼 값은 바로 파일에 저장되고, 프로그램을 다시 시작하면 적용됩니다.");
+        }
+
+        static int RankIndex(string rank)
+        {
+            if (string.Equals(rank?.Trim(), "month", StringComparison.OrdinalIgnoreCase)) return 1;
+            if (string.Equals(rank?.Trim(), "week", StringComparison.OrdinalIgnoreCase)) return 2;
+            return 0;
+        }
+
+        /// <summary>"카메라 0 — 장치 이름". 꽂혀 있지 않은 번호도 최소 몇 개는 미리 보여 준다.</summary>
+        static string[] CameraOptions()
+        {
+            var devices = WebCamTexture.devices;
+            int count = Mathf.Max(devices.Length, MinChoiceCount);
+            var options = new string[count];
+            for (int i = 0; i < count; i++)
+                options[i] = i < devices.Length ? $"카메라 {i} — {devices[i].name}" : $"카메라 {i} (연결 안 됨)";
+            return options;
+        }
+
+        /// <summary>"디스플레이 1" … 지금 연결된 수보다 많이 보여 주되, 없는 것은 표시한다.</summary>
+        static string[] DisplayOptions()
+        {
+            int connected = Display.displays.Length;
+            int count = Mathf.Max(connected, MinChoiceCount);
+            var options = new string[count];
+            for (int i = 0; i < count; i++)
+                options[i] = i < connected ? $"디스플레이 {i + 1}" : $"디스플레이 {i + 1} (연결 안 됨)";
+            return options;
         }
 
         // 키워드 월(→ keywordwall.json). 살아 있는 월 · 디렉터가 같은 설정 객체를 보고 있어 바꾸는 즉시 따라온다 —
