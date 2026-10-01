@@ -73,6 +73,16 @@ namespace StoryRest.Keyword
         }
     }
 
+    /// <summary>
+    /// 한 층(또는 여러 층)의 그라데이션 목록. 질문 · 해시태그에 입힌다. PSD 의 층 색을 기준으로 잡았다(→ WALL_CONTENT §5 "색과 배치").
+    /// </summary>
+    [Serializable]
+    public class FloorGradients
+    {
+        public int[] floors = new int[0];
+        public List<SpriteGradient> gradients = new List<SpriteGradient>();
+    }
+
     /// <summary>분류 하나와 그 분류 문구 그림들. 그림이 둘 이상이면 뜰 때마다 무작위로 하나를 붙인다.</summary>
     [Serializable]
     public class QuestionTitleSet
@@ -97,17 +107,21 @@ namespace StoryRest.Keyword
         // "지금 누군가가 궁금해한 질문" 이 머무는 시간(초). 다른 분류보다 짧다.
         public float liveSeconds = 30f;
 
-        // 한 화면에 함께 떠다닐 해시태그 수.
-        public int minTags = 3;
-        public int maxTags = 4;
+        // 한 화면에 함께 떠다닐 해시태그의 최대 개수. 두 질문의 태그를 전부 띄우되 이보다 많으면 무작위로 자른다.
+        public int maxTags = 8;
 
         // 관람 기록을 다시 세는 주기(초). 기록이 적힐 때도 다시 세지만, 자정을 넘길 때를 위해 주기도 둔다.
         public float refreshSeconds = 60f;
 
-        // 크기(1920x1200 기준 픽셀). 질문 · 분류 문구는 그림 원본 크기에 배율을 곱하고, 해시태그는 높이를 이 범위에서 뽑는다.
+        // 크기(1920x1200 기준 픽셀). 질문은 그림 원본 크기에 배율을 곱하고, 해시태그는 높이를 이 범위에서 뽑는다.
         public float questionScale = 0.9f;
+
+        // 분류 문구. 그림은 PSD 와 같은 비율로 뽑혀 있으므로 질문과 같은 배율을 따라간다(titleScale 은 그 위에 곱하는 보정).
+        // titleGap 은 PSD 에서 잰 두 그림 사이 간격(글자 사이 19px − 그림 여백 4px × 2)이고, 이것도 questionScale 을 따른다.
+        // 색은 PSD 의 분류 문구 색 그대로다. 그라데이션은 입히지 않는다.
         public float titleScale = 1f;
-        public float titleGap = 10f;
+        public float titleGap = 11f;
+        public string titleColor = "#5D5E5E";
         public float minTagHeight = 56f;
         public float maxTagHeight = 72f;
 
@@ -131,6 +145,12 @@ namespace StoryRest.Keyword
             } },
         };
 
+        public Color ResolveTitleColor()
+        {
+            return !string.IsNullOrWhiteSpace(titleColor) && ColorUtility.TryParseHtmlString(titleColor.Trim(), out var color)
+                ? color : Color.white;
+        }
+
         public string[] TitleFiles(string kind)
         {
             if (titles == null) return new string[0];
@@ -147,9 +167,7 @@ namespace StoryRest.Keyword
             maxRotateSeconds = Mathf.Max(minRotateSeconds, maxRotateSeconds);
             liveSeconds = Mathf.Max(5f, liveSeconds);
 
-            if (minTags > maxTags) (minTags, maxTags) = (maxTags, minTags);
-            minTags = Mathf.Max(0, minTags);
-            maxTags = Mathf.Clamp(maxTags, minTags, 12);
+            maxTags = Mathf.Clamp(maxTags, 0, 30);
 
             refreshSeconds = Mathf.Max(5f, refreshSeconds);
             questionScale = Mathf.Clamp(questionScale, 0.2f, 3f);
@@ -204,9 +222,34 @@ namespace StoryRest.Keyword
             new WallScreen { displayIndex = 1, floors = new[] { 2, 3 }, roles = new[] { "wall" }, liveSets = new[] { "B" }, rank = "week" },
         };
 
-        // 해시태그에 입힐 그라데이션 목록. 태그마다 이 중 하나를 무작위로 고른다. 비워 두면 흰색 그대로.
-        // 그림에 이미 색이 있으면 곱해져 탁해지므로 흰 글씨 이미지에만 쓴다. 질문 · 분류 문구는 흰색 그대로 둔다.
-        public List<SpriteGradient> spriteGradients = new List<SpriteGradient>();
+        // 질문 · 해시태그에 입힐 층별 그라데이션. PSD 의 층 색(1층 #704976 · 2층 #9B3526 · 3층 #08725D)을 기준으로 잡았다.
+        // 이 층의 목록이 없으면 흰색 그대로. 그림에 이미 색이 있으면 곱해져 탁해지므로 흰 글씨 이미지에만 쓴다.
+        public List<FloorGradients> floorGradients = new List<FloorGradients>
+        {
+            new FloorGradients { floors = new[] { 1 }, gradients = new List<SpriteGradient>
+            {
+                new SpriteGradient { from = "#704976", to = "#B07CB8" },
+                new SpriteGradient { from = "#5C3D7A", to = "#A97FC0" },
+                new SpriteGradient { from = "#704976", to = "#C08AA6" },
+            } },
+            new FloorGradients { floors = new[] { 2 }, gradients = new List<SpriteGradient>
+            {
+                new SpriteGradient { from = "#9B3526", to = "#D9724F" },
+                new SpriteGradient { from = "#8A2E3A", to = "#D35C4A" },
+                new SpriteGradient { from = "#9B3526", to = "#E09A55" },
+            } },
+            new FloorGradients { floors = new[] { 3 }, gradients = new List<SpriteGradient>
+            {
+                new SpriteGradient { from = "#08725D", to = "#3FB59A" },
+                new SpriteGradient { from = "#0A6470", to = "#3AAE8F" },
+                new SpriteGradient { from = "#08725D", to = "#7BC67A" },
+            } },
+        };
+
+        // 목록에서 어떻게 고를지. "random" = 항목마다 무작위, "first" = 첫 번째로 고정(PSD 처럼 한 가지 색).
+        public string gradientPick = "random";
+
+        public bool PickGradientAtRandom => !string.Equals(gradientPick?.Trim(), "first", StringComparison.OrdinalIgnoreCase);
 
         // 그라데이션 방향(도). 0 = 왼쪽→오른쪽, 90 = 위→아래.
         public float spriteGradientAngle = 0f;
@@ -339,14 +382,19 @@ namespace StoryRest.Keyword
         }
 
         /// <summary>설정에 적힌 그라데이션 중 읽을 수 있는 것만. 비어 있으면 그라데이션을 쓰지 않는다.</summary>
-        public List<(Color from, Color to)> ResolveSpriteGradients()
+        public List<(Color from, Color to)> ResolveSpriteGradients(int floor)
         {
             var result = new List<(Color, Color)>();
-            if (spriteGradients == null) return result;
+            if (floorGradients == null) return result;
 
-            foreach (var gradient in spriteGradients)
+            foreach (var entry in floorGradients)
             {
-                if (gradient != null && gradient.TryResolve(out var a, out var b)) result.Add((a, b));
+                if (entry?.gradients == null || entry.floors == null || Array.IndexOf(entry.floors, floor) < 0) continue;
+
+                foreach (var gradient in entry.gradients)
+                {
+                    if (gradient != null && gradient.TryResolve(out var a, out var b)) result.Add((a, b));
+                }
             }
             return result;
         }

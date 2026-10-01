@@ -4,7 +4,7 @@ using UnityEngine;
 namespace StoryRest.Keyword
 {
     /// <summary>
-    /// 벽면 화면 하나. 질문 2개(각각 위에 분류 문구)와 해시태그 3~4개가 떠다닌다. 프로젝터 한 대를 담당한다.
+    /// 벽면 화면 하나. 질문 2개(각각 위에 분류 문구)와 두 질문의 해시태그가 떠다닌다. 프로젝터 한 대를 담당한다.
     ///
     /// **무엇을 띄울지는 WallQuestionDirector 가 정한다**(→ WALL_CONTENT §5). 이 스크립트는 디렉터의 화면 하나를 보고
     /// 칸 · 태그 목록의 version 이 바뀌었을 때만 항목을 바꾼다. 바뀔 때는 교차 페이드다 — 나가는 것은 그 자리에서 사라지고
@@ -12,6 +12,7 @@ namespace StoryRest.Keyword
     ///
     /// 질문 · 분류 문구 · 해시태그는 모두 흰 글씨 PNG 라 프리팹의 `Templates/SpriteItem` 하나를 복제해 그린다.
     /// 분류 문구는 질문 그림의 자식으로 붙어 함께 움직이고, 겹침 계산은 둘을 합친 상자로 한다.
+    /// 색은 질문 · 해시태그가 층별 그라데이션, 분류 문구가 PSD 회색 단색이다(→ WALL_CONTENT §5 "색과 배치").
     ///
     /// **화면은 프리팹이 만든다**(→ ARCHITECTURE §3). 카메라·캔버스·항목 원본이 `Assets/9.Prefab/KeywordWall.prefab` 안에 있다.
     /// 좌표는 화면을 0~1 로 보는 정규화 값이다. 해상도가 다른 프로젝터를 물려도 같은 그림이 나온다.
@@ -75,6 +76,7 @@ namespace StoryRest.Keyword
         KeywordWallConfig _config;
         WallQuestionDirector _director;
         int _screenIndex;
+        int _floor;
         KeywordSpriteCache _sprites;
 
         List<KeywordMotion> _tagMotions;
@@ -87,25 +89,26 @@ namespace StoryRest.Keyword
         int _tagVersion = -1;
 
         public void Setup(KeywordWallConfig config, WallQuestionDirector director, KeywordSpriteCache sprites,
-                          int displayIndex, int wallIndex)
+                          int floor, int displayIndex, int wallIndex)
         {
             _config = config;
             _director = director;
             _screenIndex = wallIndex;
+            _floor = floor;
             _sprites = sprites;
 
             if (!BindScreen(displayIndex, wallIndex)) return;
             ApplyConfig();
         }
 
-        /// <summary>ESC 설정창에서 값이 바뀐 뒤 부른다. 움직임 · 색 목록을 다시 읽는다. 나머지는 다음 항목부터 바로 쓴다.</summary>
+        /// <summary>ESC 설정창에서 값이 바뀐 뒤 부른다. 움직임 · 그라데이션 목록을 다시 읽는다. 나머지는 다음 항목부터 바로 쓴다.</summary>
         public void ApplyConfig()
         {
             if (_config == null) return;
 
             _tagMotions = _config.ResolveMotions();
             _questionMotions = KeywordWallConfig.ResolveMotions(_config.questions.questionMotions);
-            _gradients = _config.ResolveSpriteGradients();
+            _gradients = _config.ResolveSpriteGradients(_floor);
         }
 
         /// <summary>
@@ -216,7 +219,7 @@ namespace StoryRest.Keyword
             var item = CreateItem("Question", slot.question.questionPath, isQuestion: true);
 
             item.baseAlpha = 1f;
-            item.image.ClearGradient();   // 질문 · 분류 문구는 흰색 그대로
+            ApplyGradient(item.image);
             item.imageSize = QuestionPlaceholder * q.questionScale;
 
             if (!string.IsNullOrEmpty(slot.titlePath))
@@ -225,7 +228,12 @@ namespace StoryRest.Keyword
                 title.gameObject.SetActive(true);
                 title.name = "Title";
                 title.enabled = false;
+
+                // 분류 문구는 PSD 색 단색이다. 투명도는 Apply 가 알파만 바꾸므로 색은 여기서 한 번만 정한다.
                 title.ClearGradient();
+                var titleColor = q.ResolveTitleColor();
+                titleColor.a = 0f;
+                title.color = titleColor;
                 title.rectTransform.anchorMin = title.rectTransform.anchorMax = new Vector2(0.5f, 1f);
                 title.rectTransform.pivot = new Vector2(0.5f, 0f);
                 title.rectTransform.localScale = Vector3.one;
@@ -250,16 +258,27 @@ namespace StoryRest.Keyword
             item.tagHeight = Random.Range(_config.questions.minTagHeight, _config.questions.maxTagHeight);
             item.imageSize = new Vector2(item.tagHeight * 4f, item.tagHeight);
 
-            if (_gradients.Count > 0)
-            {
-                var gradient = _gradients[Random.Range(0, _gradients.Count)];
-                item.image.SetGradient(gradient.from, gradient.to, _config.spriteGradientAngle);
-            }
-            else item.image.ClearGradient();
+            ApplyGradient(item.image);
 
             UpdateLayout(item);
             PollTextures(item);
             Place(item, _tagMotions, _config.minSpeed, _config.maxSpeed);
+        }
+
+        /// <summary>
+        /// 이 층의 그라데이션 중 하나를 입힌다(질문 · 해시태그). gradientPick 이 random 이면 항목마다 무작위, first 면 첫 번째.
+        /// 목록이 없으면 흰색 그대로.
+        /// </summary>
+        void ApplyGradient(KeywordGradientImage image)
+        {
+            if (_gradients.Count == 0)
+            {
+                image.ClearGradient();
+                return;
+            }
+
+            var gradient = _gradients[_config.PickGradientAtRandom ? Random.Range(0, _gradients.Count) : 0];
+            image.SetGradient(gradient.from, gradient.to, _config.spriteGradientAngle);
         }
 
         /// <summary>그림 하나를 복제해 항목으로 만든다. 텍스처는 비동기로 오므로 올 때까지 그림을 꺼 둔다(켜 두면 흰 사각형).</summary>
@@ -341,7 +360,9 @@ namespace StoryRest.Keyword
                     item.awaitingTitle = false;
                     item.title.texture = texture;
                     item.title.enabled = true;
-                    item.titleSize = new Vector2(texture.width, texture.height) * _config.questions.titleScale;
+                    // PSD 에서 질문과 같은 배율로 뽑은 그림이라 질문 배율을 그대로 따라가야 비율이 유지된다.
+                item.titleSize = new Vector2(texture.width, texture.height)
+                               * (_config.questions.questionScale * _config.questions.titleScale);
                     changed = true;
                 }
                 else if (failed) item.awaitingTitle = false;
@@ -363,7 +384,7 @@ namespace StoryRest.Keyword
 
             if (item.title != null && item.titleSize.y > 0f)
             {
-                float gap = _config.questions.titleGap;
+                float gap = _config.questions.titleGap * _config.questions.questionScale;
                 item.title.rectTransform.sizeDelta = item.titleSize;
                 item.title.rectTransform.anchoredPosition = new Vector2(0f, gap);
 

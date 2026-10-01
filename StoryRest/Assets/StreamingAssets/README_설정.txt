@@ -116,7 +116,7 @@ keywordwall.json 은 예외로 이 폴더의 것을 바로 읽습니다.
                    현장 배선이 반대면 두 화면의 liveSets 와 rank 를 서로 바꾸면 됩니다.
 
   [무엇이 뜨나] — 규칙은 docs/WALL_CONTENT.md §5
-  한 화면에 질문 2개(각각 위에 분류 문구) + 두 질문의 해시태그 중 3~4개가 떠다닙니다.
+  한 화면에 질문 2개(각각 위에 분류 문구) + 두 질문의 해시태그 전부(최대 maxTags)가 떠다닙니다.
   그림 재료:
     질문      floor_<N>/<마커ID>/question/question.png
     해시태그  floor_<N>/<마커ID>/sprite/NN_<태그>.png   (전시물 하나의 두 마커 폴더를 합침 · 같은 글자는 하나)
@@ -126,15 +126,19 @@ keywordwall.json 은 예외로 이 폴더의 것을 바로 읽습니다.
   questions        질문 · 해시태그 벽의 동작.
     minRotateSeconds / maxRotateSeconds   한 칸의 질문이 머무는 시간(초). 기본 120~180. 두 칸이 시차를 두고 바뀝니다.
     liveSeconds    "지금 누군가가 궁금해한 질문" 이 머무는 시간. 기본 30.
-    minTags / maxTags      한 화면의 해시태그 수. 기본 3~4.
+    maxTags        한 화면의 해시태그 최대 개수. 두 질문의 태그를 전부 띄우되 이보다 많으면 무작위로 자릅니다. 기본 8.
     refreshSeconds         관람 기록을 다시 세는 주기.
-    questionScale          질문 그림 크기 배율. titleScale 은 분류 문구 배율, titleGap 은 둘 사이 간격(px).
+    questionScale          질문 그림 크기 배율. 분류 문구도 같은 배율로 따라가 PSD 비율이 유지됩니다.
+    titleScale / titleGap  분류 문구 추가 배율(기본 1)과 질문과의 간격(PSD 값 11px, questionScale 을 따름).
+    titleColor             분류 문구 색. PSD 색 #5D5E5E 그대로. 분류 문구에는 그라데이션을 입히지 않습니다.
     minTagHeight / maxTagHeight   해시태그 높이 범위(1920x1200 기준 px). 질문보다 작게.
     minQuestionSpeed / maxQuestionSpeed / questionMotions   질문의 움직임. 읽혀야 하므로 느리게.
     titleFolder / titles   분류 문구 그림 폴더와 분류별 파일. kind 는 week · month · live · least · random.
                            파일이 둘 이상이면 뜰 때마다 무작위로 하나.
-  spriteGradients  해시태그에 입힐 그라데이션 목록 [{from, to}, …]. 태그마다 하나를 무작위로 고릅니다.
-                   비우면 흰색 그대로. 질문 · 분류 문구에는 입히지 않습니다.
+  floorGradients   질문 · 해시태그에 입힐 층별 그라데이션 목록. [{floors:[1], gradients:[{from, to}, …]}, …]
+                   PSD 의 층 색(1층 #704976 · 2층 #9B3526 · 3층 #08725D)을 기준으로 잡았습니다. 목록을 늘리면 그만큼 다양해집니다.
+                   이 층 목록이 없으면 흰색 그대로.
+  gradientPick     "random" = 항목마다 목록에서 무작위, "first" = 첫 번째로 고정. ESC 설정창의 '그라데이션 무작위'와 같은 값.
   spriteGradientAngle  그라데이션 방향(도). 0 = 왼쪽→오른쪽, 90 = 위→아래.
   minSpeed / maxSpeed             해시태그 이동 속도. 화면 전체를 0~1 로 본 초당 이동량.
   minAlpha / maxAlpha             해시태그 투명도 범위.

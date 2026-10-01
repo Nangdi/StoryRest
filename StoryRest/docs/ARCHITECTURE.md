@@ -350,7 +350,7 @@ ArUco PC 한 대가 세트 2개를 도는 구성에서 가장 크게 절약되�
 
 보이는 모양(자리·크기·글꼴·색·배경)은 여기에 없다 — `KeywordWall.prefab` 이 가진다(→ §3).
 이 파일에 남는 것은 **어느 프로젝터로 · 언제 · 얼마나**, 그리고 항목마다 다르게 뽑는 **범위**
-(`minFontSize~maxFontSize`, `colors[]`, `spriteGradients[]`)다. 범위는 값 하나가 아니라서 프리팹으로 담을 수 없다.
+(`minTagHeight~maxTagHeight`, 층별 그라데이션 `floorGradients[]`)다. 범위는 값 하나가 아니라서 프리팹으로 담을 수 없다.
 
 `walls[]` 항목마다 `displayIndex` 와 함께 `floors`(층) · `roles`(역할) 필터가 있다. 둘 다 비우면 어디서나 쓴다.
 역할 필터가 필요한 이유 — 월 PC 에는 세트가 없어 월이 **0번 디스플레이부터** 시작하고,
@@ -863,7 +863,7 @@ Game 뷰를 두 개 띄우면 동시에 볼 수도 있다. (`Display.Activate()`
 
 ## 10. 키워드 월
 
-벽면 프로젝터 2대에 **질문 2개 + 분류 문구 + 해시태그 3~4개**가 떠다니는 화면. 규칙은 `WALL_CONTENT.md` §5, 요약은 SPEC §3.1.
+벽면 프로젝터 2대에 **질문 2개 + 분류 문구 + 두 질문의 해시태그**가 떠다니는 화면. 규칙은 `WALL_CONTENT.md` §5, 요약은 SPEC §3.1.
 
 ```
 ViewLog.Recorded / DayRewritten ──▶ 7일 · 30일 관람 수 (전시물 단위)
@@ -889,15 +889,19 @@ WallQuestionCatalog.Scan ──▶ WallQuestionDirector ── screens[i].slots[
   - **live** — `ViewLog.Started` 는 큐에 최신 하나만 남긴다. 어느 칸도 live 가 아닐 때만 받아들이고, 받아들이지 못한 것은 버린다(미루지 않는다).
     `walls[].liveSets` 에 그 세트가 있는 화면에서, 같은 질문이 그 화면에 있으면 그 칸을, 없으면 더 오래된 칸을 바꾼다.
     다른 화면에 같은 질문이 떠 있으면 그 칸은 즉시 만료시켜 다른 질문으로 바뀌게 한다. live 칸의 수명은 `liveSeconds`(30초).
-  - 칸이 바뀔 때마다 그 화면의 해시태그를 다시 뽑는다 — 두 질문의 태그를 합쳐(같은 글자 하나로) `minTags`~`maxTags` 개.
+  - 칸이 바뀔 때마다 그 화면의 해시태그를 다시 정한다 — 두 질문의 태그를 합쳐(같은 글자 하나로) 전부, 많으면 `maxTags` 개까지 무작위로.
   - 칸 · 태그 목록에는 `Version` 이 있어 화면 쪽은 숫자가 바뀌었을 때만 다시 그린다.
 - **그리기 — `KeywordWall`.** 디렉터의 화면 하나를 받아 떠다니게만 한다. 항목은 세 종류다.
   - 질문 — `question.png`. 그 위에 분류 문구 그림을 자식으로 붙여 함께 움직인다. 겹침 계산은 둘을 합친 상자로 한다.
+    분류 문구는 질문과 같은 배율(`questionScale × titleScale`)과 간격(`titleGap × questionScale`)이라 PSD 비율이 유지되고,
+    색은 `titleColor`(PSD 회색) 단색이다. 질문에는 층별 그라데이션을 입힌다.
     느린 움직임(`questionMotions` · `minQuestionSpeed`~`maxQuestionSpeed`)만 쓴다 — 읽혀야 하는 글이다.
-  - 해시태그 — `sprite/` 그림. 높이 `minTagHeight`~`maxTagHeight`(1920x1200 기준 px)로 질문보다 작게, 그라데이션 · 투명도를 무작위로.
+  - 해시태그 — `sprite/` 그림. 높이 `minTagHeight`~`maxTagHeight`(1920x1200 기준 px)로 질문보다 작게, 층별 그라데이션 · 투명도를 무작위로.
   - 바뀔 때는 **교차 페이드**다. 나가는 항목은 그 자리에서 `fadeSeconds` 동안 사라지고, 들어오는 항목은 비어 있는 자리에서 나타난다.
   - 밀어내기는 **면적 가중**이다. 큰 질문이 작은 해시태그에 밀려 흔들리지 않게, 작은 쪽이 더 많이 비킨다.
   - 그림은 모두 흰 글씨 PNG 라 `KeywordGradientImage` 하나로 그린다. 프리팹의 `SpriteItem` 원본을 복제해 쓴다.
+  - 그라데이션은 `floorGradients` 에서 이 층(`floors`)의 목록을 쓴다. `gradientPick` 이 `random` 이면 항목마다 무작위,
+    `first` 면 목록 첫 번째로 고정이다. ESC 설정창에서 바로 바꿀 수 있고 다음에 나타나는 항목부터 따른다.
 - 텍스처는 `KeywordSpriteCache` 가 든다(빌리고 · 돌려주고 · 상한을 넘으면 오래된 것부터 버림). 읽기는 `UnityWebRequestTexture` 로 비동기다.
   텍스처가 도착하기 전에는 그림을 꺼 둔다 — 켜 두면 흰 사각형이 뜬다.
 - 동작 설정: **`keywordwall.json`** — 화면 배정(`walls[]` 의 `displayIndex` · `floors` · `roles` · `liveSets` · `rank`),

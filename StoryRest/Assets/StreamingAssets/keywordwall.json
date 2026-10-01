@@ -44,24 +44,33 @@
             "rank": "week"
         }
     ],
-    "spriteGradients": [
+    "floorGradients": [
         {
-            "from": "#B04A8C",
-            "to": "#8C8C99"
+            "floors": [1],
+            "gradients": [
+                { "from": "#704976", "to": "#B07CB8" },
+                { "from": "#5C3D7A", "to": "#A97FC0" },
+                { "from": "#704976", "to": "#C08AA6" }
+            ]
         },
         {
-            "from": "#4A8CB0",
-            "to": "#99A6B8"
+            "floors": [2],
+            "gradients": [
+                { "from": "#9B3526", "to": "#D9724F" },
+                { "from": "#8A2E3A", "to": "#D35C4A" },
+                { "from": "#9B3526", "to": "#E09A55" }
+            ]
         },
         {
-            "from": "#C08A3A",
-            "to": "#B0A48C"
-        },
-        {
-            "from": "#4AB08C",
-            "to": "#8CA699"
+            "floors": [3],
+            "gradients": [
+                { "from": "#08725D", "to": "#3FB59A" },
+                { "from": "#0A6470", "to": "#3AAE8F" },
+                { "from": "#08725D", "to": "#7BC67A" }
+            ]
         }
     ],
+    "gradientPick": "random",
     "spriteGradientAngle": 0.0,
     "minSpeed": 0.012,
     "maxSpeed": 0.04,
@@ -82,12 +91,12 @@
         "minRotateSeconds": 120.0,
         "maxRotateSeconds": 180.0,
         "liveSeconds": 30.0,
-        "minTags": 3,
-        "maxTags": 4,
+        "maxTags": 8,
         "refreshSeconds": 60.0,
         "questionScale": 0.9,
         "titleScale": 1.0,
-        "titleGap": 10.0,
+        "titleGap": 11.0,
+        "titleColor": "#5D5E5E",
         "minTagHeight": 56.0,
         "maxTagHeight": 72.0,
         "minQuestionSpeed": 0.004,

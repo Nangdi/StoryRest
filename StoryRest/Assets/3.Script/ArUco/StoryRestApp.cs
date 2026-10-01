@@ -269,7 +269,7 @@ namespace StoryRest.ArUco
                 }
 
                 wall.gameObject.SetActive(true);
-                wall.Setup(KeywordConfig, Questions, Sprites, walls[i].displayIndex, i);
+                wall.Setup(KeywordConfig, Questions, Sprites, Settings.floor, walls[i].displayIndex, i);
                 _walls.Add(wall);
             }
 

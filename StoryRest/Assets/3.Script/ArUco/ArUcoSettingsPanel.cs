@@ -154,17 +154,18 @@ namespace StoryRest.ArUco
                 () => q.liveSeconds, v => q.liveSeconds = v,
                 "마커가 인식된 질문이 벽에 머무는 시간(초). 떠 있는 동안 들어온 인식은 이 분류를 바꾸지 않는다.", keyword: true);
 
-            IntRow(parent, "해시태그 수 최소  questions.minTags", 0, 12,
-                () => q.minTags, v => q.minTags = Mathf.Min(v, q.maxTags),
-                "한 화면에 함께 떠다닐 해시태그 수. 다음 교체부터.", applyToSets: false, keyword: true);
-            IntRow(parent, "해시태그 수 최대  questions.maxTags", 0, 12,
-                () => q.maxTags, v => q.maxTags = Mathf.Max(v, q.minTags), null, applyToSets: false, keyword: true);
+            IntRow(parent, "해시태그 최대 개수  questions.maxTags", 0, 30,
+                () => q.maxTags, v => q.maxTags = v,
+                "두 질문의 해시태그를 전부 띄우되 이보다 많으면 무작위로 자른다. 다음 교체부터.", applyToSets: false, keyword: true);
 
-            Header(parent, "키워드 월 — 크기 · 움직임");
+            Header(parent, "키워드 월 — 색 · 크기 · 움직임");
+
+            ToggleRow(parent, "그라데이션 무작위  gradientPick",
+                () => wall.PickGradientAtRandom, v => wall.gradientPick = v ? "random" : "first", keyword: true);
 
             FloatRow(parent, "질문 크기  questions.questionScale", 0.3f, 2f, 0.05f, "0.00",
                 () => q.questionScale, v => q.questionScale = v,
-                "질문 그림 원본 크기에 곱하는 배율. 다음에 나타나는 질문부터.", keyword: true);
+                "질문 그림 원본 크기에 곱하는 배율. 분류 문구도 같은 배율로 따라간다(PSD 비율 유지). 다음에 나타나는 질문부터.", keyword: true);
 
             FloatRow(parent, "해시태그 높이 최소  questions.minTagHeight", 16f, 200f, 2f, "0",
                 () => q.minTagHeight, v => q.minTagHeight = Mathf.Min(v, q.maxTagHeight),

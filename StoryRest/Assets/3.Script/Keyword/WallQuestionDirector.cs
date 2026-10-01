@@ -337,7 +337,7 @@ namespace StoryRest.Keyword
             return pool[UnityEngine.Random.Range(0, pool.Count)];
         }
 
-        /// <summary>두 질문의 해시태그를 합쳐(같은 글자는 하나) 그중 minTags~maxTags 개를 무작위로.</summary>
+        /// <summary>두 질문의 해시태그를 합쳐(같은 글자는 하나) 전부 띄운다. maxTags 보다 많으면 무작위로 자른다.</summary>
         void RebuildTags(QuestionScreen screen)
         {
             var keys = new List<string>();
@@ -355,7 +355,7 @@ namespace StoryRest.Keyword
             }
 
             Shuffle(paths);
-            int count = Mathf.Min(paths.Count, UnityEngine.Random.Range(_config.minTags, _config.maxTags + 1));
+            int count = Mathf.Min(paths.Count, _config.maxTags);
 
             screen.tags.Clear();
             for (int i = 0; i < count; i++) screen.tags.Add(paths[i]);
