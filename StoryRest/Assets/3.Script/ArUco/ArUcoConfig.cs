@@ -76,6 +76,15 @@ namespace StoryRest.ArUco
         public void Reset()
         {
             projectorPoints = DefaultProjectorPoints();
+            ClearCameraPoints();
+        }
+
+        /// <summary>
+        /// 카메라 쪽 값만 지운다. 현장에서 옮겨 둔 조준점 자리(projectorPoints)는 남겨
+        /// 다시 보정할 때 같은 자리에서 잡게 한다.
+        /// </summary>
+        public void ClearCameraPoints()
+        {
             cameraPoints = new Vector2[0];
             valid = false;
         }

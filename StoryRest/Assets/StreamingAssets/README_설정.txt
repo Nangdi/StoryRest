@@ -80,6 +80,8 @@ keywordwall.json 은 예외로 이 폴더의 것을 바로 읽습니다.
   manualTargetSize       수동 보정 때 "마커를 여기 놓으세요" 사각형 크기. 편집모드에서 +/- 로 맞춤.
   adjustPositionStep / adjustScaleStep / adjustRotationStep  편집모드에서 키 한 번에 움직이는 양.
   sets[].calibration     카메라↔프로젝터 대응점. 편집모드 보정(F3)이 채웁니다. valid 가 true 여야 투사가 맞습니다.
+                         projectorPoints = 조준 사각형 자리(화면 비율, 위가 0). 수동 보정 중 방향키로 옮깁니다.
+                         보정 단계 Backspace 는 카메라 값만 지우고, Ctrl+Backspace 는 사각형 자리까지 기본값으로 돌립니다.
   sets[].globalScale / globalOffsetX / globalOffsetY   세트 전체 크기·위치 보정.
   sets[].markers[]       마커별 보정(scale, offsetX/Y, rotationOffset, enabled)과 파일별 보정(items[]).
 
@@ -195,6 +197,7 @@ ESC 로 열고 닫습니다. 값을 움직이면 바로 적용되고 1초 뒤 ar
     PageUp / PageDown       세트 전체 배율
     Space                   코너 보정 진행 (자동 → 수동 → 점 확정 → 완료)
     + -  (수동 보정 중)     조준 사각형 크기
+    ← → ↑ ↓ (수동 보정 중)  지금 짚을 사각형 자리 옮기기 (네 점 다 잡으면 저장)
     Backspace / Ctrl+Backspace  세트 전체 초기화 / 선택한 대상 초기화
     V  D  P  F5             콘텐츠 표시 · 마커 테두리 · 원근 · 콘텐츠 다시 읽기
     H                       안내판 자리 옮기기

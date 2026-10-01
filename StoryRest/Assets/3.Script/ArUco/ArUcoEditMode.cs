@@ -67,6 +67,8 @@ namespace StoryRest.ArUco
         [SerializeField] int autoSampleFrames = 30;
         [Tooltip("투사할 마커의 화면상 크기(짧은 변 기준 비율).")]
         [SerializeField] float calibrationMarkerSize = 0.18f;
+        [Tooltip("수동 보정 중 방향키 한 번에 사각형을 옮기는 거리(화면 비율). Shift 면 fineMultiplier 배.")]
+        [SerializeField] float calibrationPointStep = 0.005f;
 
         StoryRestApp _app;
         ArUcoHelpPanel _help;
@@ -93,6 +95,10 @@ namespace StoryRest.ArUco
         readonly int[] _accumCount = new int[4];
         readonly Vector2[] _collected = new Vector2[4];
         readonly bool[] _collectedOk = new bool[4];
+
+        // 수동 보정 동안 옮기는 조준점 자리. 설정의 projectorPoints 를 복사해 두고 여기서만 움직인다.
+        // 네 점을 다 확정해야 설정에 들어가므로, 중간에 나가도 기존 보정(카메라 값과 짝)이 깨지지 않는다.
+        readonly Vector2[] _manualPoints = new Vector2[4];
         string _calibrationMessage = "";
 
         bool _dirty;
@@ -504,20 +510,25 @@ namespace StoryRest.ArUco
 
             if (Input.GetKeyDown(resetMarkerKey))
             {
-                calibration.Reset();
+                // 맨키는 카메라 값만, Ctrl 은 옮겨 둔 사각형 자리까지 기본값으로.
+                bool all = IsCtrlHeld();
+                if (all) calibration.Reset();
+                else calibration.ClearCameraPoints();
+                projectorPoints = calibration.projectorPoints;
+
                 set.RebuildProjection();
                 _phase = CalibrationPhase.Idle;
-                _calibrationMessage = "보정값을 지웠습니다.";
+                _calibrationMessage = all ? "보정값과 사각형 자리를 기본값으로 돌렸습니다." : "보정값을 지웠습니다. 사각형 자리는 남겨 둡니다.";
                 MarkDirty();
             }
 
             switch (_phase)
             {
                 case CalibrationPhase.Auto: CollectAuto(set, projectorPoints); break;
-                case CalibrationPhase.Manual: CollectManual(set); AdjustTargetSize(); break;
+                case CalibrationPhase.Manual: CollectManual(set); AdjustTargetSize(); MoveManualPoint(); break;
             }
 
-            DrawCalibrationOverlay(set, projectorPoints);
+            DrawCalibrationOverlay(set, _phase == CalibrationPhase.Manual ? _manualPoints : projectorPoints);
         }
 
         void AdvanceCalibration(ArUcoSet set)
@@ -530,7 +541,7 @@ namespace StoryRest.ArUco
 
                 case CalibrationPhase.Auto:
                     // 자동이 안 잡히면 사람이 짚는 방식으로 넘어간다.
-                    BeginManual();
+                    BeginManual(set);
                     break;
 
                 case CalibrationPhase.Manual:
@@ -559,14 +570,36 @@ namespace StoryRest.ArUco
             _calibrationMessage = "네 귀퉁이에 마커를 투사하고 있습니다. 카메라가 읽을 때까지 기다리세요.";
         }
 
-        void BeginManual()
+        void BeginManual(ArUcoSet set)
         {
             _phase = CalibrationPhase.Manual;
             _manualIndex = 0;
 
-            for (int i = 0; i < 4; i++) _collectedOk[i] = false;
+            var points = set.Config.calibration.projectorPoints;
+            for (int i = 0; i < 4; i++)
+            {
+                _collectedOk[i] = false;
+                _manualPoints[i] = points[i];
+            }
 
             _calibrationMessage = "사각형 안에 마커를 맞춰 놓고 Space 를 누르세요.";
+        }
+
+        /// <summary>
+        /// 지금 짚을 사각형을 방향키로 옮긴다. 책자가 놓이는 영역의 귀퉁이에 두는 편이 정확하다.
+        /// 이미 확정한 점은 카메라 값과 짝이 지어졌으므로 건드리지 않는다.
+        /// </summary>
+        void MoveManualPoint()
+        {
+            if (_manualIndex >= 4) return;
+
+            float step = calibrationPointStep * (IsShiftHeld() ? fineMultiplier : 1f);
+            float dx = (KeyStep(KeyCode.RightArrow) - KeyStep(KeyCode.LeftArrow)) * step;
+            float dy = (KeyStep(KeyCode.DownArrow) - KeyStep(KeyCode.UpArrow)) * step;   // 정규화 좌표는 위가 0
+            if (dx == 0f && dy == 0f) return;
+
+            var p = _manualPoints[_manualIndex];
+            _manualPoints[_manualIndex] = new Vector2(Mathf.Clamp01(p.x + dx), Mathf.Clamp01(p.y + dy));
         }
 
         /// <summary>
@@ -675,7 +708,7 @@ namespace StoryRest.ArUco
                 return;
             }
 
-            ApplyCalibration(set, set.Config.calibration.projectorPoints);
+            ApplyCalibration(set, (Vector2[])_manualPoints.Clone());
         }
 
         void ApplyCalibration(ArUcoSet set, Vector2[] projectorPoints)
@@ -915,6 +948,7 @@ namespace StoryRest.ArUco
             b.AppendLine($"{k}PageUp / PageDown{d}세트 전체 배율");
             b.AppendLine($"{k}{actionKey}{d}코너 보정 진행 (자동 → 수동 → 점 확정 → 완료)");
             b.AppendLine($"{k}+ -  (수동 보정 중){d}조준 사각형 크기");
+            b.AppendLine($"{k}← → ↑ ↓  (수동 보정 중){d}지금 짚을 사각형 자리 옮기기");
             b.AppendLine($"{k}{resetMarkerKey} / Ctrl+{resetMarkerKey}{d}세트 전체 초기화 / 선택한 대상 초기화");
             b.AppendLine($"{k}{contentKey}  {outlineKey}  {perspectiveKey}  {reloadContentKey}{d}콘텐츠 표시 · 마커 테두리 · 원근 · 콘텐츠 다시 읽기");
             b.AppendLine($"{k}{hudKey}{d}안내판 자리 옮기기 (네 귀퉁이 → 한 줄로 접기)");
@@ -1103,6 +1137,12 @@ namespace StoryRest.ArUco
                     _builder.AppendLine($"수동 보정  <b>{Mathf.Min(_manualIndex + 1, 4)}/4</b>");
                     _builder.AppendLine($"자리 크기  <b>{_app.Config.manualTargetSize:0.00}</b>" +
                                         $"   <color=#888888>+ / - 로 실물 마커에 맞춤 (Shift 미세)</color>");
+                    if (_manualIndex < 4)
+                    {
+                        var p = _manualPoints[_manualIndex];
+                        _builder.AppendLine($"자리  <b>{p.x:0.000}, {p.y:0.000}</b>" +
+                                            "   <color=#888888>← → ↑ ↓ 로 옮김 (Shift 미세)</color>");
+                    }
                     break;
 
                 case CalibrationPhase.Verify:
@@ -1112,7 +1152,7 @@ namespace StoryRest.ArUco
 
             if (!string.IsNullOrEmpty(_calibrationMessage)) _builder.AppendLine(_calibrationMessage);
 
-            _builder.AppendLine($"<color=#888888>{resetMarkerKey} 보정값 지우기</color>");
+            _builder.AppendLine($"<color=#888888>{resetMarkerKey} 보정값 지우기 · Ctrl+{resetMarkerKey} 사각형 자리까지 기본값</color>");
         }
 
         // ── 입력 보조 ────────────────────────────────────────────────────────────
