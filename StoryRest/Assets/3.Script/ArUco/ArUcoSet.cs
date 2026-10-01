@@ -347,6 +347,9 @@ namespace StoryRest.ArUco
 
                 if (entries == null || entries.Count == 0)
                 {
+                    // 안내 모드가 꺼져 있으면(전시 상태) 아무것도 비추지 않는다.
+                    if (!_config.showEmptyGuide) continue;
+
                     // 자리만 잡아 두면 현장에서 "인식은 되는데 콘텐츠가 없다"를 바로 구분할 수 있다.
                     var empty = ArUcoPlacement.Of(markerConfig);
 

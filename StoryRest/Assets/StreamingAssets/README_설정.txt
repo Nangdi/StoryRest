@@ -69,6 +69,7 @@ keywordwall.json 은 예외로 이 폴더의 것을 바로 읽습니다.
   viewMinDwellSeconds    이 시간 이상 잡혀야 관람 1회로 셈.
   viewResumeGraceSeconds 놓친 뒤 이 시간 안에 돌아오면 같은 관람 · 영상은 멈춘 자리에서 이어서. 넘기면 처음으로.
   recordViews            관람 기록을 파일로 남길지.
+  showEmptyGuide         콘텐츠(video/)가 없는 마커에 "N번 마커 · 콘텐츠가 없습니다" 안내를 띄울지. 설치·점검용, 전시 중엔 false.
   maxSimultaneous        세트 하나가 동시에 띄울 마커 수. 0 = 제한 없음.
   perspectiveMapping     true = 원근까지 맞춤 / false = 회전·크기만 (마커가 작아 심하게 떨릴 때).
   warpSubdivisions       원근 격자 분할 수. 6 이상.

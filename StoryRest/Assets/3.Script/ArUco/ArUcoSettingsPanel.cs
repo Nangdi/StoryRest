@@ -244,6 +244,9 @@ namespace StoryRest.ArUco
             ToggleRow(parent, "관람 기록  recordViews",
                 () => config.recordViews, v => config.recordViews = v);
 
+            ToggleRow(parent, "콘텐츠 없는 마커 안내  showEmptyGuide",
+                () => config.showEmptyGuide, v => config.showEmptyGuide = v);
+
             BuildAppearRows(parent, config);
 
             Note(parent, $"설정 파일: {ArUcoConfigIO.Path}");

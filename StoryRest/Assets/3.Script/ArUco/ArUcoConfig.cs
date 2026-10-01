@@ -392,6 +392,11 @@ namespace StoryRest.ArUco
         // 관람을 파일로 남길지. persistentDataPath/stats/ 에 날짜별 CSV 로 쌓인다.
         public bool recordViews = true;
 
+        // 콘텐츠(video/)가 없는 마커를 올렸을 때 그 자리에 "N번 마커 · 콘텐츠가 없습니다" 안내를 띄울지.
+        // 설치 · 점검 때 "인식은 되는데 콘텐츠가 없다" 를 바로 구분하는 모드다. 전시 중에는 꺼 둔다 —
+        // 책자 위에 빈 상자와 안내 문구가 비치면 관람객에게는 고장처럼 보인다. 꺼져 있으면 아무것도 그리지 않는다.
+        public bool showEmptyGuide = false;
+
         // ---- 등장 연출 (→ ArUcoAppear.cs, ARCHITECTURE §5 등장 연출) ----
         // 마커를 놓고 멈추면 빛 고리가 퍼진 뒤 콘텐츠가 나타난다. 놓칠 때는 연출 없이 holdSeconds 뒤 꺼진다.
         public AppearConfig appear = new AppearConfig();
