@@ -285,15 +285,11 @@ canvas.planeDistance = 1f;
 | 바꾸는 법 | 에디터에서 보면서 → 빌드 다시 | json 을 고쳐 → 재시작만 |
 | 예 | `9.Prefab/KeywordWall.prefab` | `keywordwall.json` |
 
-- **키워드 월**(`KeywordWall.prefab`) — 카메라 · 캔버스 · 주제 카드 · 떠다니는 항목 원본이 한 프리팹에 들어 있다.
+- **키워드 월**(`KeywordWall.prefab`) — 카메라 · 캔버스 · 떠다니는 항목 원본이 한 프리팹에 들어 있다.
   씬에 인스턴스 둘(`KeywordWall_A/B`)이 놓여 있고, `KeywordWall` 은 그것을 **움직이기만** 한다.
-  - `Items` — 떠다니는 것들이 들어갈 자리. 항목은 `Templates/WordItem`(낱말) 이나 `Templates/SpriteItem`(그림)을
-    복제해 만든다. 원본은 꺼진 `Templates` 아래 있어 화면에 뜨지 않는다.
+  - `Items` — 떠다니는 것들이 들어갈 자리. 질문 · 분류 문구 · 해시태그 모두 `Templates/SpriteItem`(그림)을 복제해 만든다.
+    원본은 꺼진 `Templates` 아래 있어 화면에 뜨지 않는다.
     항목의 **위치만은** 코드가 매 프레임 계산하므로 앵커·피벗은 가운데로 고정한다.
-  - `Spotlight` — 주제 카드. 제목(`Label`) · 주제 이름(`Topic`) · 그림 칸(`ImageBox`)이 루트 안에 **각자 자유롭게** 놓인다.
-    레이아웃 그룹을 두지 않는다 — 두면 자식 자리를 매 프레임 덮어써서 씬에서 끌어도 되돌아간다.
-    그림은 `AspectRatioFitter` 로 칸 안에 맞는다. `showTopicName` 을 끄면 주제 줄만 숨고 자리는 비어 있다.
-    떠다니는 것들이 비켜 가는 자리(`ReservedArea`)는 **루트의 사각형**이다 — 조각을 루트 밖으로 빼면 루트도 키운다.
 - **ArUco 세트**(`ArUcoSet.prefab`) — 뿌리에 `ArUcoSet` · `ArUcoProjectionView` · `ArUcoMarkerTracker` 가 붙어 있고,
   그 아래 카메라 · 캔버스 · 레이어가 들어 있다. 씬에 인스턴스 둘(`ArUcoSet_A/B`)이 놓여 있다.
   - 레이어가 **자식 순서로 보인다**: `CameraPreview < Highlight < Rings < Content < Labels < Overlays < Status < EditHud`.
@@ -867,61 +863,55 @@ Game 뷰를 두 개 띄우면 동시에 볼 수도 있다. (`Display.Activate()`
 
 ## 10. 키워드 월
 
-벽면 프로젝터 2대에 과학 낱말(또는 스프라이트 그림)이 떠다니는 배경 화면. 관람객 인터랙션은 없다.
-
-- 낱말 목록: **`floor_<N>/keywords.txt`** — 한 줄에 하나, `#`로 시작하면 주석.
-  콘텐츠와 같은 층 폴더에 두어 층마다 다른 낱말을 쓸 수 있다. 메모장으로 고칠 수 있게 평문이다.
-- 스프라이트: **`floor_<N>/<마커ID>/sprite/*.png|jpg`** — 이 층에 하나라도 있으면 낱말 대신 이것이 떠다닌다(→ SPEC §3.1).
-  `ArUcoContentIndex.ScanSprites` 가 그림을 가진 폴더를 `SpriteFolder{markerId, folderName, files}` 단위로 모으고,
-  `KeywordWallConfig.PickSprites` 가 `minSpriteFolders`~`maxSpriteFolders` 범위에서 개수를 뽑아 폴더를 무작위로 고른 뒤
-  그 파일들을 한 목록으로 펴서 `KeywordWall.Setup` 에 넘긴다. 고른 폴더는 시작 로그에 남는다.
-  무작위는 "어느 폴더냐" 까지이고, 화면에 도는 순서는 마커 ID 순으로 되돌린다(같은 폴더 그림이 뭉쳐 나오지 않게).
-  두 월 화면은 같은 목록을 쓴다. 다시 뽑는 시점은 재시작뿐이다 — 상시 전시라 하루 단위로 껐다 켜므로 그것으로 충분하다고 봤다.
-  월 하나의 항목(`Item`)은 `TMP_Text` 또는 `RawImage` 중 하나를 갖고, 움직임·겹침·페이드는 둘이 같은 코드를 탄다.
-  크기는 `minSpriteSize`~`maxSpriteSize`(긴 변, 1920x1200 기준 픽셀)이고 종횡비는 원본을 따른다.
-- 색은 `KeywordGradientImage`(RawImage 확장)가 `OnPopulateMesh` 에서 꼭짓점 색으로 두 색을 곱한다. 사각형 4꼭짓점이라
-  GPU 보간이 곧 직선 그라데이션이다 — 셰이더·머티리얼 없음. `Graphic.color`(페이드용 알파)는 base 가 넣은 위에 곱한다.
-  그래서 스프라이트는 **흰 글씨**여야 한다. `spriteGradients` 가 비어 있으면 곱하지 않는다.
-- 스프라이트 텍스처는 `KeywordSpriteCache` 가 든다. 항목이 태어날 때 빌리고(`Acquire`) 사라질 때 돌려주며(`Release`),
-  아무도 안 쓰는 것은 상한을 넘기면 오래된 것부터 버린다. 층에 그림이 70장 넘게 있어도 화면에 뜬 만큼만 메모리에 올린다.
-  읽기는 `UnityWebRequestTexture` 로 비동기다(`ArUcoImageCache` 와 같은 이유 — 메인 스레드 디코딩은 프레임을 끊는다).
-  텍스처가 도착하기 전에는 `RawImage` 를 꺼 둔다 — 켜 두면 흰 사각형이 뜬다. 페이드인 시간이 로딩을 대개 덮는다.
-- 동작 설정: **`keywordwall.json`** — 디스플레이 번호(층·역할별, → §4), 개수, 크기·속도·투명도 범위, 색상.
-
-### 주제 카드 (왼쪽 위)
+벽면 프로젝터 2대에 **질문 2개 + 분류 문구 + 해시태그 3~4개**가 떠다니는 화면. 규칙은 `WALL_CONTENT.md` §5, 요약은 SPEC §3.1.
 
 ```
-StoryRestApp ── KeywordSpotlight (모델, 앱에 하나) ── Cards[]  ◀── ViewLog.ReadDay(오늘 / 7일 / 30일) + Recorded/DayRewritten
-                                                            ▲
-KeywordWall_0 ── KeywordSpotlightView (화면마다 하나) ────────┘   카드를 한 장씩 페이드로 돌림
-KeywordWall_1 ── KeywordSpotlightView ──────────────────────┘
+ViewLog.Recorded / DayRewritten ──▶ 7일 · 30일 관람 수 (전시물 단위)
+ViewLog.Started (1초 유지 순간) ──▶ "지금 누군가" 후보                     ▲ 앱에 하나
+                                     │
+WallQuestionCatalog.Scan ──▶ WallQuestionDirector ── screens[i].slots[0..1] · tags
+                                     │  (분류 고르기 · 2~3분 교체 · 30초 live)
+                                     ▼  Version 으로 바뀐 것만 알림
+                 KeywordWall_0 · KeywordWall_1  (화면마다 하나, 그리기만 한다)
 ```
 
-- `KeywordSpotlight` 가 재료를 만든다. 추천(날짜 씨앗) + 오늘 / 최근 7일 / 최근 30일 1위 — **그림이 있는 마커 중에서**. 카드에 실을 것이
-  그림뿐이라 그림 없는 마커는 후보가 아니다. 세는 기준은 건수다 — 시간 합계로 세면 한 사람이 오래 본 주제가 여럿이 잠깐씩 본 주제를 이긴다.
-  기록이 한 건 적히면 `_dirty` 만 켜고 다음 `Tick` 에서 한 번 다시 센다. 주기(`refreshSeconds`)로도 다시 세서 자정을 넘기는 것을 따라간다.
-  30일치 파일을 한 번 훑으며 세 표(오늘·7일·30일)를 같이 채운다 — 몇 MB 를 넘지 않는다. 목록이 실제로 바뀌었을 때만 `Version` 이 오른다.
-- 주제 이름은 `ArUcoContentIndex.ScanFolderNames` 로 얻는다. 월 PC 는 마커 표(`Rescan`)를 만들지 않으므로 `GetFolderName` 을 쓸 수 없다.
-  그림은 `ScanSprites` 의 폴더별 첫 파일. `KeywordSpriteCache` 에서 빌려 쓰고 카드가 바뀔 때 돌려준다 — 그래서 낱말 모드여도 캐시는 만든다.
-- `KeywordSpotlightView` 는 상태 기계(Waiting → FadeIn → Hold → FadeOut → Waiting)다. Waiting 은 `intervalSeconds - (페이드×2 + cardSeconds)`
-  만큼 쉰다 — 간격은 "한 장이 뜨고 다음 장이 뜰 때까지" 로 정의해 설치자가 셈하기 쉽게 했다. 첫 장은 쉬지 않고 바로 뜬다.
-  카드 목록이 바뀌어도 지금 카드는 끝까지 보여 주고 다음 장부터 새 목록의 처음으로 간다. 사라져 있는 동안은 그림을 캐시에 돌려준다.
-- 제목·설명 줄은 `TextOverflowModes.Overflow` 여야 한다. Ellipsis/Truncate 로 두면 한글 대체 폰트의 줄 높이(글자 크기의 1.4배 이상)가
-  상자를 조금만 넘어도 첫 줄째부터 통째로 잘려 아무것도 안 뜬다(2026-09-21 확인).
-- 카드 자리(`KeywordSpotlightView.ReservedArea`, 화면 0~1 사각형)는 **카드가 뜰 때만** 잠긴다(`KeywordWall.UpdateReserved`).
-  평소에는 항목들이 화면 전체를 쓴다 — 한 구석을 늘 비워 두면 허전하다. 뷰의 `SecondsUntilShow` 가 낱말 `fadeSeconds` 이하로 내려오면
-  자리를 잠그고, 그 안에 있던 항목은 수명을 당겨 카드보다 먼저 사라지게 한다(지금 밝기에서 이어서 — 수명만 줄이면 밝기가 1 로 튄다).
-  잠긴 동안은 태어날 자리 후보에서 빠지고, 들어오면 `KeepOutOfReserved` 가 가까운 변으로 밀어내며 진행 방향도 꺾는다.
-  카드가 사라지면 자리도 풀린다. 카드는 항목들보다 뒤에 만들어져 위에 그려진다.
+- **재료 — `WallQuestionCatalog`.** 층 폴더를 한 번 훑어 전시물 목록을 만든다. 전시물 n = 마커 `2n-1`(핵심) · `2n`(자세히).
+  질문 그림은 둘 중 먼저 있는 `question/question.png`, 해시태그는 두 마커의 `sprite/` 를 합친 것이다.
+  같은 글자(파일 이름에서 `NN_` 과 확장자를 뗀 것)는 하나로 친다 — 핵심 · 자세히 태그가 102개 전시물에서 같기 때문이다.
+  질문 그림이 없는 전시물은 목록에 넣지 않는다.
+- **판단 — `WallQuestionDirector`.** 화면을 모르는 순수 C# 모델이다. 월 화면마다 칸 두 개(`Slot`)와 해시태그 목록을 갖는다.
+  - 칸마다 만료 시각이 있고 지나면 새로 뽑는다. 처음 두 칸은 두 번째 칸의 수명을 절반으로 시작해 이후로 자연히 어긋난다(칸별 시차).
+  - 새로 뽑을 때 분류 **종류**(랜덤 · 최소 선택 · 그 화면의 1위)를 같은 확률로 고르고, 종류에 맞는 질문을 고른다.
+    두 화면 어디에든 이미 떠 있는 질문은 후보가 아니다. 1위가 이미 떠 있으면 그 종류는 이번에 쓸 수 없다.
+    한 화면의 두 칸이 같은 조건 분류(1위 · 최소)를 갖지 않게 하고, 분류 문구 그림도 겹치지 않게 고른다.
+  - 순위는 `ViewLog.ReadDay` 30일치를 한 번 훑어 7일 · 30일 표를 함께 채운다. `Recorded` · `DayRewritten` 에 표시만 해 두고
+    다음 틱에 다시 세며, 자정을 넘기는 것은 주기(`refreshSeconds`)로 따라간다. 마커 ID 는 `(id + 1) / 2` 로 전시물 번호가 된다.
+  - **live** — `ViewLog.Started` 는 큐에 최신 하나만 남긴다. 어느 칸도 live 가 아닐 때만 받아들이고, 받아들이지 못한 것은 버린다(미루지 않는다).
+    `walls[].liveSets` 에 그 세트가 있는 화면에서, 같은 질문이 그 화면에 있으면 그 칸을, 없으면 더 오래된 칸을 바꾼다.
+    다른 화면에 같은 질문이 떠 있으면 그 칸은 즉시 만료시켜 다른 질문으로 바뀌게 한다. live 칸의 수명은 `liveSeconds`(30초).
+  - 칸이 바뀔 때마다 그 화면의 해시태그를 다시 뽑는다 — 두 질문의 태그를 합쳐(같은 글자 하나로) `minTags`~`maxTags` 개.
+  - 칸 · 태그 목록에는 `Version` 이 있어 화면 쪽은 숫자가 바뀌었을 때만 다시 그린다.
+- **그리기 — `KeywordWall`.** 디렉터의 화면 하나를 받아 떠다니게만 한다. 항목은 세 종류다.
+  - 질문 — `question.png`. 그 위에 분류 문구 그림을 자식으로 붙여 함께 움직인다. 겹침 계산은 둘을 합친 상자로 한다.
+    느린 움직임(`questionMotions` · `minQuestionSpeed`~`maxQuestionSpeed`)만 쓴다 — 읽혀야 하는 글이다.
+  - 해시태그 — `sprite/` 그림. 높이 `minTagHeight`~`maxTagHeight`(1920x1200 기준 px)로 질문보다 작게, 그라데이션 · 투명도를 무작위로.
+  - 바뀔 때는 **교차 페이드**다. 나가는 항목은 그 자리에서 `fadeSeconds` 동안 사라지고, 들어오는 항목은 비어 있는 자리에서 나타난다.
+  - 밀어내기는 **면적 가중**이다. 큰 질문이 작은 해시태그에 밀려 흔들리지 않게, 작은 쪽이 더 많이 비킨다.
+  - 그림은 모두 흰 글씨 PNG 라 `KeywordGradientImage` 하나로 그린다. 프리팹의 `SpriteItem` 원본을 복제해 쓴다.
+- 텍스처는 `KeywordSpriteCache` 가 든다(빌리고 · 돌려주고 · 상한을 넘으면 오래된 것부터 버림). 읽기는 `UnityWebRequestTexture` 로 비동기다.
+  텍스처가 도착하기 전에는 그림을 꺼 둔다 — 켜 두면 흰 사각형이 뜬다.
+- 동작 설정: **`keywordwall.json`** — 화면 배정(`walls[]` 의 `displayIndex` · `floors` · `roles` · `liveSets` · `rank`),
+  `questions`(교체 주기 · live 시간 · 태그 개수 · 크기 · 분류 문구 파일), 그리고 움직임 · 투명도 · 그라데이션 범위.
+- **"지금 인식됨" 신호.** `ArUcoViewCounter` 가 관람으로 세는 순간 `ViewLog.NotifyStarted` 를 부른다(파일에는 안 적음).
+  `ViewStatsServer` 는 이것을 `now <csv>` 로 보내고, `ViewStatsClient` 는 받아 같은 이벤트를 낸다.
+  all 역할은 한 프로세스 안이라 이벤트가 바로 닿는다.
 - 2·3층에서는 월 PC(`role=wall`)에서만 뜬다. ArUco PC 는 월을 만들지 않는다.
-- **월 화면은 16:10** 이다(→ SPEC §3.1). 좌표는 화면을 0~1로 보는 정규화 값이고, 글자·그림 크기는 **1920x1200** 기준 픽셀을
-  `CanvasScaler`(ScaleWithScreenSize)로 화면에 맞춰 배율한다. 그래서 프로젝터 해상도가 서로 달라도(또는 창이 작아도) 같은 그림이 나온다.
-  에디터에서 확인할 때는 Game 뷰 비율을 16:10 으로 두어야 실제 배치가 보인다.
-  픽셀 그대로 두었을 때는 작은 화면에서 낱말 16개가 들어갈 자리가 없어 서로 밀어내며 겹치고 떨렸다(2026-09-11 수정).
-- 캔버스 크기는 만든 프레임에 바로 정해지지 않는다. `Canvas.ForceUpdateCanvases()` 를 한 번 부른 뒤 첫 낱말을 놓아야
+- **월 화면은 16:10** 이다(→ SPEC §3.1). 좌표는 화면을 0~1로 보는 정규화 값이고, 그림 크기는 **1920x1200** 기준 픽셀을
+  `CanvasScaler`(ScaleWithScreenSize)로 화면에 맞춰 배율한다. 에디터에서 확인할 때는 Game 뷰 비율을 16:10 으로 둔다.
+- 캔버스 크기는 만든 프레임에 바로 정해지지 않는다. `Canvas.ForceUpdateCanvases()` 를 한 번 부른 뒤 첫 항목을 놓아야
   크기(halfSize)가 실제 화면 기준으로 계산된다.
-- 시간은 `unscaledDeltaTime`을 쓴다. `GameManager`가 `Time.timeScale`을 만지므로
-  배경 화면이 거기 끌려가면 안 된다.
+- 시간은 `unscaledDeltaTime`을 쓴다. `GameManager`가 `Time.timeScale`을 만지므로 배경 화면이 거기 끌려가면 안 된다.
+- 예전 구조(낱말 `keywords.txt` · 스프라이트 폴더 무작위 뽑기 · 왼쪽 위 주제 카드 `KeywordSpotlight`)는 2026-10-01 걷어냈다.
 
 ### 다섯 가지 움직임
 

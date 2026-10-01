@@ -3,60 +3,47 @@
     "walls": [
         {
             "displayIndex": 1,
-            "floors": [
-                1
-            ],
-            "roles": [
-                "all"
-            ]
+            "floors": [1],
+            "roles": ["all"],
+            "liveSets": ["A"],
+            "rank": "month"
         },
         {
             "displayIndex": 2,
-            "floors": [
-                1,
-                2,
-                3
-            ],
-            "roles": [
-                "all"
-            ]
+            "floors": [1],
+            "roles": ["all"],
+            "liveSets": ["B"],
+            "rank": "week"
+        },
+        {
+            "displayIndex": 2,
+            "floors": [2, 3],
+            "roles": ["all"],
+            "liveSets": ["A"],
+            "rank": "month"
         },
         {
             "displayIndex": 3,
-            "floors": [
-                2,
-                3
-            ],
-            "roles": [
-                "all"
-            ]
+            "floors": [2, 3],
+            "roles": ["all"],
+            "liveSets": ["B"],
+            "rank": "week"
         },
         {
             "displayIndex": 0,
-            "floors": [
-                2,
-                3
-            ],
-            "roles": [
-                "wall"
-            ]
+            "floors": [2, 3],
+            "roles": ["wall"],
+            "liveSets": ["A"],
+            "rank": "month"
         },
         {
             "displayIndex": 1,
-            "floors": [
-                2,
-                3
-            ],
-            "roles": [
-                "wall"
-            ]
+            "floors": [2, 3],
+            "roles": ["wall"],
+            "liveSets": ["B"],
+            "rank": "week"
         }
     ],
-    "maxOnScreen": 16,
-    "minFontSize": 44.0,
-    "maxFontSize": 132.0,
-    "minSpriteSize": 360.0,
-    "maxSpriteSize": 760.0,
     "spriteGradients": [
         {
             "from": "#B04A8C",
@@ -76,15 +63,11 @@
         }
     ],
     "spriteGradientAngle": 0.0,
-    "minSpriteFolders": 5,
-    "maxSpriteFolders": 10,
-    "minSpeed": 0.012000000104308129,
-    "maxSpeed": 0.054999999701976779,
-    "minAlpha": 0.30000001192092898,
-    "maxAlpha": 0.949999988079071,
-    "minLifetime": 14.0,
-    "maxLifetime": 30.0,
-    "fadeSeconds": 1.7999999523162842,
+    "minSpeed": 0.012,
+    "maxSpeed": 0.04,
+    "minAlpha": 0.55,
+    "maxAlpha": 0.95,
+    "fadeSeconds": 1.8,
     "motions": [
         "Drift",
         "Wave",
@@ -92,28 +75,54 @@
         "Bob",
         "Zigzag"
     ],
-    "colors": [
-        "#FFFFFF",
-        "#8FE3FF",
-        "#B9C7FF",
-        "#9FFFE0",
-        "#FFE9A8"
-    ],
-    "avoidDuplicates": true,
     "separation": 0.5,
-    "separationPadding": 1.149999976158142,
-    "edgeMargin": 0.029999999329447748,
-    "spotlight": {
-        "enabled": true,
-        "alwaysOn": true,
-        "intervalSeconds": 60.0,
-        "cardSeconds": 12.0,
-        "fadeSeconds": 0.800000011920929,
-        "showTopicName": false,
+    "separationPadding": 1.15,
+    "edgeMargin": 0.03,
+    "questions": {
+        "minRotateSeconds": 120.0,
+        "maxRotateSeconds": 180.0,
+        "liveSeconds": 30.0,
+        "minTags": 3,
+        "maxTags": 4,
         "refreshSeconds": 60.0,
-        "recommendLabel": "오늘의 추천 컨텐츠",
-        "todayLabel": "오늘의 베스트셀러",
-        "weekLabel": "이번주의 베스트셀러",
-        "monthLabel": "이번달의 베스트셀러"
+        "questionScale": 0.9,
+        "titleScale": 1.0,
+        "titleGap": 10.0,
+        "minTagHeight": 56.0,
+        "maxTagHeight": 72.0,
+        "minQuestionSpeed": 0.004,
+        "maxQuestionSpeed": 0.012,
+        "questionMotions": [
+            "Drift",
+            "Bob"
+        ],
+        "titleFolder": "wall_titles",
+        "titles": [
+            {
+                "kind": "week",
+                "files": ["09_이번 주 호기심 1위.png"]
+            },
+            {
+                "kind": "month",
+                "files": ["08_이번 달 호기심 1위.png"]
+            },
+            {
+                "kind": "live",
+                "files": ["07_지금 누군가가 궁금해한 질문.png"]
+            },
+            {
+                "kind": "least",
+                "files": ["06_아직 만나보지 못한 질문.png", "05_이 질문의 첫 탐험가를 찾습니다.png"]
+            },
+            {
+                "kind": "random",
+                "files": [
+                    "04_이 질문도 함께 만나보세요.png",
+                    "03_쉬는 동안 궁금증 하나.png",
+                    "02_잠깐, 그게 정말이야.png",
+                    "01_어디 한번 알아볼까요.png"
+                ]
+            }
+        ]
     }
 }

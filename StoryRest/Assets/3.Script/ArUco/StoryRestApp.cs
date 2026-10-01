@@ -49,11 +49,11 @@ namespace StoryRest.ArUco
         /// <summary>이번 실행이 띄운 키워드 월들. 설정창이 값을 바꾼 뒤 ApplyConfig 를 돌리는 데 쓴다.</summary>
         public IReadOnlyList<KeywordWall> Walls => _walls;
 
-        /// <summary>월의 그림 텍스처(떠다니는 스프라이트 + 주제 카드 그림). 월이 있을 때만 만들어지고 월 화면들이 함께 쓴다.</summary>
+        /// <summary>월의 그림 텍스처(질문 · 분류 문구 · 해시태그). 월이 있을 때만 만들어지고 월 화면들이 함께 쓴다.</summary>
         public KeywordSpriteCache Sprites { get; private set; }
 
-        /// <summary>월 왼쪽 위 주제 카드의 재료(추천 · 인기 순위). 월 화면들이 함께 본다.</summary>
-        public KeywordSpotlight Spotlight { get; private set; }
+        /// <summary>월에 무엇을 띄울지 정하는 모델(→ WALL_CONTENT §5). 월 화면들이 함께 본다.</summary>
+        public WallQuestionDirector Questions { get; private set; }
 
         /// <summary>관람 기록 링크. aruco 역할이면 서버, wall 역할이면 클라이언트, all 이면 둘 다 null.</summary>
         public ViewStatsServer StatsServer { get; private set; }
@@ -244,35 +244,6 @@ namespace StoryRest.ArUco
             var walls = ActiveWalls();
             if (walls.Count == 0) return;
 
-            // 무엇이 떠다니는지는 층 폴더가 정한다(→ SPEC §3.1). <마커ID>/sprite/ 에 그림이 하나라도 있으면
-            // 그 층은 스프라이트, 없으면 keywords.txt 의 낱말. 화면끼리 같은 목록을 공유한다.
-            var spriteFolders = ArUcoContentIndex.ScanSprites(Settings.ContentRoot);
-            bool useSprites = spriteFolders.Count > 0;
-            List<string> entries;
-
-            // 여유분은 한 화면 분량 — 방금 사라진 그림이 곧 다시 나올 때 다시 읽지 않을 만큼이면 된다.
-            // 낱말 모드여도 주제 카드가 그림을 쓰므로 월이 있으면 늘 만든다.
-            Sprites = new KeywordSpriteCache(this, KeywordConfig.maxOnScreen);
-
-            if (useSprites)
-            {
-                // 폴더가 100개면 전부 띄우기엔 너무 많다. 설정 범위만큼 폴더를 무작위로 골라 그 그림만 띄운다.
-                var picked = new List<SpriteFolder>();
-                entries = KeywordConfig.PickSprites(spriteFolders, picked);
-
-                Debug.Log($"[Keyword] 그림이 있는 폴더 {spriteFolders.Count}개 중 {picked.Count}개를 골라 " +
-                          $"그림 {entries.Count}장을 띄웁니다(낱말 대신). " +
-                          $"고른 폴더: [{string.Join(", ", picked.ConvertAll(f => f.folderName))}]  " +
-                          $"(keywordwall.json 의 minSpriteFolders~maxSpriteFolders)");
-            }
-            else
-            {
-                entries = KeywordList.Load(Settings.ContentRoot);
-            }
-
-            if (KeywordConfig.spotlight.enabled)
-                Spotlight = new KeywordSpotlight(KeywordConfig.spotlight, Settings.ContentRoot);
-
             int wallCount = walls.Count;
             if (wallCount > _keywordWalls.Length)
             {
@@ -282,6 +253,11 @@ namespace StoryRest.ArUco
                 Debug.LogError($"[Keyword] {_problems[_problems.Count - 1]}");
                 wallCount = _keywordWalls.Length;
             }
+
+            // 화면 수만큼만 디렉터에 넘긴다 — 씬에 월이 모자라면 없는 화면에 질문을 배정하지 않게.
+            Sprites = new KeywordSpriteCache(this, 24);
+            Questions = new WallQuestionDirector(KeywordConfig.questions, Settings.floor, Settings.ContentRoot,
+                                                 walls.GetRange(0, wallCount));
 
             for (int i = 0; i < wallCount; i++)
             {
@@ -293,14 +269,12 @@ namespace StoryRest.ArUco
                 }
 
                 wall.gameObject.SetActive(true);
-                wall.Setup(KeywordConfig, entries, useSprites ? Sprites : null, walls[i].displayIndex, i);
-                if (Spotlight != null) wall.AttachSpotlight(Spotlight, Sprites);
+                wall.Setup(KeywordConfig, Questions, Sprites, walls[i].displayIndex, i);
                 _walls.Add(wall);
             }
 
-            Debug.Log($"[Keyword] {Settings.floor}층 키워드 월 {_walls.Count}개 " +
-                      $"({(useSprites ? "스프라이트" : "낱말")} {entries.Count}개 · " +
-                      $"디스플레이 {string.Join(", ", walls.ConvertAll(w => w.displayIndex))})");
+            Debug.Log($"[Keyword] {Settings.floor}층 키워드 월 {_walls.Count}개 · 질문 {Questions.QuestionCount}개 · " +
+                      $"디스플레이 {string.Join(", ", walls.ConvertAll(w => w.displayIndex))}");
         }
 
         /// <summary>
@@ -361,13 +335,13 @@ namespace StoryRest.ArUco
 
         void Update()
         {
-            // 카드 재료는 월 화면 수와 무관하게 한 번만 센다.
-            Spotlight?.Tick();
+            // 무엇을 띄울지는 월 화면 수와 무관하게 한 번만 정한다.
+            Questions?.Tick(Time.unscaledTime);
         }
 
         void OnDestroy()
         {
-            Spotlight?.Dispose();
+            Questions?.Dispose();
             Sprites?.ReleaseAll();
             if (Instance == this) Instance = null;
         }

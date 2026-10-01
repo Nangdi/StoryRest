@@ -147,6 +147,15 @@ namespace StoryRest.Stats
             {
                 HandleSynced(line.Substring(7));
             }
+            else if (line.StartsWith("now "))
+            {
+                // 방금 관람으로 세어진 것. 파일에는 적지 않고 이벤트만 낸다(→ ViewLog.Started).
+                if (ViewLog.TryParse(line.Substring(4), out var record))
+                {
+                    Traffic?.Invoke($"← {line}");
+                    ViewLog.NotifyStarted(record);
+                }
+            }
         }
 
         void HandleView(string csv)

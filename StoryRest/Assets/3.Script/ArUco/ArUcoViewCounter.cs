@@ -108,6 +108,9 @@ namespace StoryRest.ArUco
                 {
                     session.counted = true;
                     CountedThisRun++;
+
+                    // 기록은 끝날 때 적지만, 월의 "지금 누군가" 는 지금 알아야 한다.
+                    ViewLog.NotifyStarted(new ViewRecord(session.startedAt, _floor, _setName, id, 0f));
                 }
             }
 

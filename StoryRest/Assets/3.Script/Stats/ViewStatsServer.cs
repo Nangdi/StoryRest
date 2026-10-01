@@ -20,6 +20,9 @@ namespace StoryRest.Stats
     ///   클라이언트 → 서버   sync 2026-09-11              그 날 파일을 통째로 달라
     ///   서버 → 클라이언트   view 2026-09-11T14:03:27,2,A,17,42.5   한 건 (sync 응답이든 방금 적힌 것이든 같다)
     ///                      synced 2026-09-11 37          sync 응답 끝 · 보낸 줄 수
+    ///                      now 2026-09-11T14:03:27,2,A,17,0.0    방금 관람으로 세어짐(기록 아님 · 월의 "지금 누군가" 용)
+    ///
+    /// now 는 sync 로 다시 보내지 않는다. 끊겨 있던 동안의 "지금" 은 지나간 일이다.
     ///
     /// 서버가 원본이고 월 PC 는 미러다. 월 PC 가 재시작하거나 선이 빠졌다 돌아오면 sync 로 다시 맞추면 되므로
     /// 서버는 누가 무엇을 받았는지 기억하지 않는다. 연결이 없으면 그냥 파일에만 적힌다 — 잃는 것이 없다.
@@ -110,6 +113,7 @@ namespace StoryRest.Stats
             _ = AcceptLoopAsync(_cts.Token);
 
             ViewLog.Recorded += OnRecorded;
+            ViewLog.Started += OnStarted;
             Debug.Log($"[Stats] 관람 기록 서버 대기 중 — 포트 {_port}");
             _traffic.Enqueue($"포트 {_port} 대기 시작");
         }
@@ -117,6 +121,7 @@ namespace StoryRest.Stats
         void OnDestroy()
         {
             ViewLog.Recorded -= OnRecorded;
+            ViewLog.Started -= OnStarted;
 
             try { _cts?.Cancel(); } catch { /* 이미 정리됨 */ }
             _cts?.Dispose();
@@ -141,6 +146,11 @@ namespace StoryRest.Stats
             if (ClientCount > 0) SentThisRun++;
 
             Broadcast("view " + line);
+        }
+
+        void OnStarted(ViewRecord record)
+        {
+            Broadcast("now " + ViewLog.Format(record));
         }
 
         async Task AcceptLoopAsync(CancellationToken token)

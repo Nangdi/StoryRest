@@ -30,6 +30,21 @@ namespace StoryRest.Keyword
         // 한 PC 가 다 맡는 all 에서는 세트 뒤 번호로 밀린다. 같은 층이라도 역할에 따라 번호가 다르다.
         public string[] roles = new string[0];
 
+        // 이 화면에 "지금 누군가가 궁금해한 질문" 을 띄울 ArUco 세트 이름. 관람객이 마주 보는 벽에 뜨게 정한다(→ WALL_CONTENT §5).
+        // 첫 번째 월(오른쪽 벽) = 세트 A(왼쪽 전시대), 두 번째 월(왼쪽 벽) = 세트 B. 배선이 반대면 이 값만 바꾼다.
+        public string[] liveSets = new string[0];
+
+        // 이 화면에만 뜨는 순위 분류. "week" = 이번 주 호기심 1위, "month" = 이번 달 호기심 1위, 비우면 없음.
+        public string rank = "";
+
+        public bool ShowsLiveFrom(string setName)
+        {
+            if (liveSets == null || string.IsNullOrEmpty(setName)) return false;
+            foreach (string name in liveSets)
+                if (string.Equals(name?.Trim(), setName.Trim(), StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
         public bool IsUsedOn(int floor, AppRole role)
         {
             if (floors != null && floors.Length > 0 && Array.IndexOf(floors, floor) < 0) return false;
@@ -58,48 +73,98 @@ namespace StoryRest.Keyword
         }
     }
 
+    /// <summary>분류 하나와 그 분류 문구 그림들. 그림이 둘 이상이면 뜰 때마다 무작위로 하나를 붙인다.</summary>
+    [Serializable]
+    public class QuestionTitleSet
+    {
+        // week · month · live · least · random (→ WallQuestionDirector)
+        public string kind = "random";
+
+        // StreamingAssets/<titleFolder>/ 안의 파일 이름.
+        public string[] files = new string[0];
+    }
+
     /// <summary>
-    /// 월 왼쪽 위의 주제 카드(→ SPEC §3.1). "오늘의 추천 컨텐츠 · 오늘 / 이번주 / 이번달의 베스트셀러" 가 한 장씩 돌아가며 뜬다.
-    /// 카드는 제목과 그림뿐이다. 이름과 시간은 현장에서 바꿀 수 있게 값으로 둔다.
-    ///
-    /// **자리·크기·글꼴·색은 여기에 없다.** 그것들은 KeywordWall 프리팹의 Spotlight 가 가진다(→ ARCHITECTURE §3).
-    /// 여기 남는 것은 "언제 · 얼마나 · 무엇을" 뿐이다.
+    /// 질문 · 해시태그 벽의 동작(→ WALL_CONTENT §5). 규칙의 숫자들을 현장에서 바꿀 수 있게 값으로 둔다.
     /// </summary>
     [Serializable]
-    public class SpotlightConfig
+    public class QuestionWallConfig
     {
-        public bool enabled = true;
+        // 한 칸의 질문이 머무는 시간(초). 이 범위에서 칸마다 뽑는다.
+        public float minRotateSeconds = 120f;
+        public float maxRotateSeconds = 180f;
 
-        // 카드를 상시 띄운다. 쉬는 시간 없이 한 장이 cardSeconds 머문 뒤 바로 다음 장으로 넘어가고,
-        // 카드가 한 장뿐이면 넘기지 않고 그대로 둔다. 자리도 늘 비어 있다. ESC 설정창의 체크박스로 켜고 끈다.
-        public bool alwaysOn = false;
+        // "지금 누군가가 궁금해한 질문" 이 머무는 시간(초). 다른 분류보다 짧다.
+        public float liveSeconds = 30f;
 
-        // 카드가 뜨는 간격(초). 한 장이 뜨고 나서 다음 장이 뜰 때까지. 상시 떠 있으면 배경이 아니라 광고판처럼 보여 띄엄띄엄 띄운다.
-        // alwaysOn 이면 쓰지 않는다.
-        public float intervalSeconds = 60f;
+        // 한 화면에 함께 떠다닐 해시태그 수.
+        public int minTags = 3;
+        public int maxTags = 4;
 
-        // 한 장이 떠 있는 시간과 뜨고 질 때 페이드 시간(초). 둘을 합친 것이 간격보다 길면 쉬지 않고 이어진다.
-        public float cardSeconds = 12f;
-        public float fadeSeconds = 0.8f;
-
-        // 제목 아래에 주제 이름(폴더 이름에서 번호를 뗀 것)을 한 줄 넣을지. 폴더에 제목이 없는 마커는 켜도 빈 줄이다.
-        public bool showTopicName = false;
-
-        // 관람 기록을 다시 세는 주기(초). 기록이 한 건 적힐 때마다도 다시 세지만, 자정을 넘길 때를 위해 주기도 둔다.
+        // 관람 기록을 다시 세는 주기(초). 기록이 적힐 때도 다시 세지만, 자정을 넘길 때를 위해 주기도 둔다.
         public float refreshSeconds = 60f;
 
-        // 카드 이름. 순서대로 추천 · 오늘 · 이번주 · 이번달.
-        public string recommendLabel = "오늘의 추천 컨텐츠";
-        public string todayLabel = "오늘의 베스트셀러";
-        public string weekLabel = "이번주의 베스트셀러";
-        public string monthLabel = "이번달의 베스트셀러";
+        // 크기(1920x1200 기준 픽셀). 질문 · 분류 문구는 그림 원본 크기에 배율을 곱하고, 해시태그는 높이를 이 범위에서 뽑는다.
+        public float questionScale = 0.9f;
+        public float titleScale = 1f;
+        public float titleGap = 10f;
+        public float minTagHeight = 56f;
+        public float maxTagHeight = 72f;
+
+        // 질문은 읽혀야 하므로 느리게, 튀지 않는 움직임만 쓴다.
+        public float minQuestionSpeed = 0.004f;
+        public float maxQuestionSpeed = 0.012f;
+        public string[] questionMotions = { "Drift", "Bob" };
+
+        // 분류 문구 그림이 든 폴더(StreamingAssets 아래)와 분류별 파일.
+        public string titleFolder = "wall_titles";
+        public List<QuestionTitleSet> titles = new List<QuestionTitleSet>
+        {
+            new QuestionTitleSet { kind = "week",   files = new[] { "09_이번 주 호기심 1위.png" } },
+            new QuestionTitleSet { kind = "month",  files = new[] { "08_이번 달 호기심 1위.png" } },
+            new QuestionTitleSet { kind = "live",   files = new[] { "07_지금 누군가가 궁금해한 질문.png" } },
+            new QuestionTitleSet { kind = "least",  files = new[] { "06_아직 만나보지 못한 질문.png", "05_이 질문의 첫 탐험가를 찾습니다.png" } },
+            new QuestionTitleSet { kind = "random", files = new[]
+            {
+                "04_이 질문도 함께 만나보세요.png", "03_쉬는 동안 궁금증 하나.png",
+                "02_잠깐, 그게 정말이야.png", "01_어디 한번 알아볼까요.png",
+            } },
+        };
+
+        public string[] TitleFiles(string kind)
+        {
+            if (titles == null) return new string[0];
+            foreach (var set in titles)
+                if (set != null && string.Equals(set.kind, kind, StringComparison.OrdinalIgnoreCase))
+                    return set.files ?? new string[0];
+            return new string[0];
+        }
 
         public void Sanitize()
         {
-            intervalSeconds = Mathf.Max(0f, intervalSeconds);
-            cardSeconds = Mathf.Max(2f, cardSeconds);
-            fadeSeconds = Mathf.Clamp(fadeSeconds, 0f, cardSeconds * 0.5f);
+            if (minRotateSeconds > maxRotateSeconds) (minRotateSeconds, maxRotateSeconds) = (maxRotateSeconds, minRotateSeconds);
+            minRotateSeconds = Mathf.Max(10f, minRotateSeconds);
+            maxRotateSeconds = Mathf.Max(minRotateSeconds, maxRotateSeconds);
+            liveSeconds = Mathf.Max(5f, liveSeconds);
+
+            if (minTags > maxTags) (minTags, maxTags) = (maxTags, minTags);
+            minTags = Mathf.Max(0, minTags);
+            maxTags = Mathf.Clamp(maxTags, minTags, 12);
+
             refreshSeconds = Mathf.Max(5f, refreshSeconds);
+            questionScale = Mathf.Clamp(questionScale, 0.2f, 3f);
+            titleScale = Mathf.Clamp(titleScale, 0.2f, 3f);
+            titleGap = Mathf.Max(0f, titleGap);
+
+            if (minTagHeight > maxTagHeight) (minTagHeight, maxTagHeight) = (maxTagHeight, minTagHeight);
+            minTagHeight = Mathf.Max(8f, minTagHeight);
+            maxTagHeight = Mathf.Max(minTagHeight, maxTagHeight);
+
+            if (minQuestionSpeed > maxQuestionSpeed) (minQuestionSpeed, maxQuestionSpeed) = (maxQuestionSpeed, minQuestionSpeed);
+            minQuestionSpeed = Mathf.Max(0f, minQuestionSpeed);
+
+            if (string.IsNullOrWhiteSpace(titleFolder)) titleFolder = "wall_titles";
+            if (titles == null || titles.Count == 0) titles = new QuestionWallConfig().titles;
         }
     }
 
@@ -111,9 +176,9 @@ namespace StoryRest.Keyword
     /// 여기와 프리팹의 경계는 이렇다(→ ARCHITECTURE §3):
     ///   - **프리팹**(`Assets/9.Prefab/KeywordWall.prefab`) — 보이는 모양. 자리·크기·글꼴·색·배경.
     ///     에디터에서 보면서 잡는 값들이다.
-    ///   - **이 파일** — 시간과 개수, 그리고 항목마다 다르게 뽑는 범위(글자 크기 범위, 색 목록, 그라데이션 목록).
+    ///   - **이 파일** — 시간과 개수, 그리고 항목마다 다르게 뽑는 범위(크기 범위, 그라데이션 목록).
     ///     "화면마다 다르게 · 매번 다르게" 라서 프리팹의 값 하나로는 담을 수 없는 것들과,
-    ///     현장에서 빌드를 다시 만들지 않고 바꿔야 하는 것들(층·디스플레이 배정, 카드 간격)이다.
+    ///     현장에서 빌드를 다시 만들지 않고 바꿔야 하는 것들(층·디스플레이 배정, 교체 주기)이다.
     /// </summary>
     [Serializable]
     public class KeywordWallConfig
@@ -127,64 +192,38 @@ namespace StoryRest.Keyword
         //   1층 (all)    — PC 1대, 프로젝터 3대: ArUco 0번 + 키워드 월 1, 2번
         //   2·3층 (wall) — 월 PC, 프로젝터 2대: 키워드 월 0, 1번  (ArUco PC 는 월을 띄우지 않는다)
         //   2·3층 (all)  — 포트가 넉넉해 PC 1대로 돌릴 때: ArUco 0, 1번 + 키워드 월 2, 3번
+        //
+        // 층마다 첫 번째 월이 오른쪽 벽(세트 A 의 "지금 누군가" · 이번 달 1위), 두 번째가 왼쪽 벽(세트 B · 이번 주 1위)이다.
         public List<WallScreen> walls = new List<WallScreen>
         {
-            new WallScreen { displayIndex = 1, floors = new[] { 1 },       roles = new[] { "all" } },
-            new WallScreen { displayIndex = 2, floors = new[] { 1, 2, 3 }, roles = new[] { "all" } },
-            new WallScreen { displayIndex = 3, floors = new[] { 2, 3 },    roles = new[] { "all" } },
-            new WallScreen { displayIndex = 0, floors = new[] { 2, 3 },    roles = new[] { "wall" } },
-            new WallScreen { displayIndex = 1, floors = new[] { 2, 3 },    roles = new[] { "wall" } },
+            new WallScreen { displayIndex = 1, floors = new[] { 1 },    roles = new[] { "all" },  liveSets = new[] { "A" }, rank = "month" },
+            new WallScreen { displayIndex = 2, floors = new[] { 1 },    roles = new[] { "all" },  liveSets = new[] { "B" }, rank = "week" },
+            new WallScreen { displayIndex = 2, floors = new[] { 2, 3 }, roles = new[] { "all" },  liveSets = new[] { "A" }, rank = "month" },
+            new WallScreen { displayIndex = 3, floors = new[] { 2, 3 }, roles = new[] { "all" },  liveSets = new[] { "B" }, rank = "week" },
+            new WallScreen { displayIndex = 0, floors = new[] { 2, 3 }, roles = new[] { "wall" }, liveSets = new[] { "A" }, rank = "month" },
+            new WallScreen { displayIndex = 1, floors = new[] { 2, 3 }, roles = new[] { "wall" }, liveSets = new[] { "B" }, rank = "week" },
         };
 
-        // 한 화면에 동시에 떠 있는 키워드 수.
-        public int maxOnScreen = 16;
-
-        // 글자 크기 범위(1920x1200 기준 픽셀). 크기를 섞으면 깊이감이 생긴다.
-        public float minFontSize = 44f;
-        public float maxFontSize = 132f;
-
-        // 스프라이트 크기 범위(긴 변, 1920x1200 기준 픽셀). 종횡비는 원본을 따른다.
-        // floor_<N>/<마커ID>/sprite/ 에 그림이 있으면 낱말 대신 이것이 떠다닌다(→ SPEC §3.1).
-        // 스프라이트가 대개 가로로 긴 글자 이미지(예: 694x165)라 긴 변 기준을 넉넉히 잡는다 — 360 이면 글자 높이가 85px 뿐이다.
-        public float minSpriteSize = 360f;
-        public float maxSpriteSize = 760f;
-
-        // 흰 글씨 스프라이트에 입힐 그라데이션 목록. 낱말마다 이 중 하나를 무작위로 고른다. 비워 두면 원본 색 그대로.
-        // 그림에 이미 색이 있으면 곱해져 탁해지므로 흰색 글씨 이미지에만 쓴다. 주제 카드의 그림에도 같이 입힌다.
+        // 해시태그에 입힐 그라데이션 목록. 태그마다 이 중 하나를 무작위로 고른다. 비워 두면 흰색 그대로.
+        // 그림에 이미 색이 있으면 곱해져 탁해지므로 흰 글씨 이미지에만 쓴다. 질문 · 분류 문구는 흰색 그대로 둔다.
         public List<SpriteGradient> spriteGradients = new List<SpriteGradient>();
 
         // 그라데이션 방향(도). 0 = 왼쪽→오른쪽, 90 = 위→아래.
         public float spriteGradientAngle = 0f;
 
-        // 그림을 가진 마커 폴더 중 몇 개를 띄울지. 층에 폴더가 100개면 전부 띄우기엔 너무 많다.
-        // 시작할 때 이 범위에서 개수를 하나 뽑고, 그 수만큼 폴더를 무작위로 골라 그 안의 그림만 띄운다.
-        // 두 값 다 0 이면 전부 띄운다. 폴더 수가 모자라면 있는 만큼만.
-        public int minSpriteFolders = 5;
-        public int maxSpriteFolders = 10;
-
-        // 이동 속도 범위. 화면 짧은 변을 1 로 보는 초당 이동량이라 해상도가 달라도 같게 보인다.
+        // 해시태그 이동 속도 범위. 화면 짧은 변을 1 로 보는 초당 이동량이라 해상도가 달라도 같게 보인다.
         public float minSpeed = 0.012f;
         public float maxSpeed = 0.055f;
 
-        // 투명도 범위. 옅은 것과 진한 것이 섞여야 배경처럼 깔린다.
-        public float minAlpha = 0.30f;
+        // 해시태그 투명도 범위. 질문 · 분류 문구는 늘 불투명하다.
+        public float minAlpha = 0.55f;
         public float maxAlpha = 0.95f;
-
-        // 한 키워드가 머무는 시간(초). 지나면 사라지고 다른 낱말이 등장한다.
-        public float minLifetime = 14f;
-        public float maxLifetime = 30f;
 
         // 나타나고 사라지는 데 걸리는 시간. 갑자기 튀어나오지 않게 한다.
         public float fadeSeconds = 1.8f;
 
-        // 쓸 움직임 패턴. 비워 두면 전부 사용한다.
+        // 해시태그가 쓸 움직임 패턴. 비워 두면 전부 사용한다.
         public string[] motions = { "Drift", "Wave", "Orbit", "Bob", "Zigzag" };
-
-        // 글자 색. 현장에서 고치기 쉽도록 16진수 문자열로 둔다.
-        public string[] colors = { "#FFFFFF", "#8FE3FF", "#B9C7FF", "#9FFFE0", "#FFE9A8" };
-
-        // 같은 낱말이 화면에 두 개 뜨지 않게 한다. 키워드가 적을 때는 자동으로 완화된다.
-        public bool avoidDuplicates = true;
 
         // 글자끼리 겹쳤을 때 서로 밀어내는 세기(초당 정규화 이동량).
         // 0 이면 밀어내지 않는다. 너무 크면 낱말이 튕기듯 움직여 부자연스럽다.
@@ -197,8 +236,8 @@ namespace StoryRest.Keyword
         // 투사면 모서리가 벽에 걸리는 자리에서는 값을 올린다.
         public float edgeMargin = 0.03f;
 
-        // 왼쪽 위 주제 카드(추천 컨텐츠 · 베스트셀러).
-        public SpotlightConfig spotlight = new SpotlightConfig();
+        // 질문 · 해시태그 벽(→ WALL_CONTENT §5).
+        public QuestionWallConfig questions = new QuestionWallConfig();
 
         public static string Path => System.IO.Path.Combine(Application.streamingAssetsPath, FileName);
 
@@ -255,29 +294,18 @@ namespace StoryRest.Keyword
         /// <summary>손으로 고치다 뒤집힌 값(최소 &gt; 최대 등)을 바로잡는다.</summary>
         public void Sanitize()
         {
-            maxOnScreen = Mathf.Clamp(maxOnScreen, 1, 200);
-
-            if (minFontSize > maxFontSize) Swap(ref minFontSize, ref maxFontSize);
-            if (minSpriteSize > maxSpriteSize) Swap(ref minSpriteSize, ref maxSpriteSize);
-            if (minSpriteFolders > maxSpriteFolders) Swap(ref minSpriteFolders, ref maxSpriteFolders);
-            minSpriteFolders = Mathf.Max(0, minSpriteFolders);
-            maxSpriteFolders = Mathf.Max(0, maxSpriteFolders);
             if (minSpeed > maxSpeed) Swap(ref minSpeed, ref maxSpeed);
             if (minAlpha > maxAlpha) Swap(ref minAlpha, ref maxAlpha);
-            if (minLifetime > maxLifetime) Swap(ref minLifetime, ref maxLifetime);
 
-            minFontSize = Mathf.Max(8f, minFontSize);
-            minSpriteSize = Mathf.Max(16f, minSpriteSize);
             minAlpha = Mathf.Clamp01(minAlpha);
             maxAlpha = Mathf.Clamp01(maxAlpha);
-            minLifetime = Mathf.Max(1f, minLifetime);
-            fadeSeconds = Mathf.Clamp(fadeSeconds, 0f, minLifetime * 0.5f);
+            fadeSeconds = Mathf.Clamp(fadeSeconds, 0f, 5f);
             separation = Mathf.Max(0f, separation);
             separationPadding = Mathf.Clamp(separationPadding, 1f, 3f);
             edgeMargin = Mathf.Clamp(edgeMargin, 0f, 0.2f);
 
-            if (spotlight == null) spotlight = new SpotlightConfig();
-            spotlight.Sanitize();
+            if (questions == null) questions = new QuestionWallConfig();
+            questions.Sanitize();
         }
 
         static void Swap(ref float a, ref float b)
@@ -285,50 +313,16 @@ namespace StoryRest.Keyword
             float t = a; a = b; b = t;
         }
 
-        static void Swap(ref int a, ref int b)
-        {
-            int t = a; a = b; b = t;
-        }
-
-        /// <summary>
-        /// 그림을 가진 폴더 중 띄울 것을 무작위로 고른다. 결과는 그 폴더들의 그림을 한 목록으로 편 것이다.
-        /// picked 에는 고른 폴더가 마커 ID 순으로 남는다(로그용).
-        /// </summary>
-        public List<string> PickSprites(List<ArUco.SpriteFolder> folders, List<ArUco.SpriteFolder> picked)
-        {
-            picked.Clear();
-            if (folders == null || folders.Count == 0) return new List<string>();
-
-            // 0/0 이면 전부. 아니면 범위에서 개수를 뽑되 있는 폴더 수를 넘지 않는다.
-            int count = maxSpriteFolders <= 0
-                ? folders.Count
-                : Mathf.Min(folders.Count, UnityEngine.Random.Range(Mathf.Max(1, minSpriteFolders), maxSpriteFolders + 1));
-
-            // 앞에서 count 개만 섞는다(부분 Fisher-Yates). 뽑히지 않은 나머지는 순서가 상관없다.
-            var pool = new List<ArUco.SpriteFolder>(folders);
-            for (int i = 0; i < count; i++)
-            {
-                int j = UnityEngine.Random.Range(i, pool.Count);
-                (pool[i], pool[j]) = (pool[j], pool[i]);
-                picked.Add(pool[i]);
-            }
-
-            // 화면에 도는 순서는 마커 ID 순으로 되돌린다. 무작위는 "어느 폴더냐" 까지만이다.
-            picked.Sort((a, b) => a.markerId.CompareTo(b.markerId));
-
-            var sprites = new List<string>();
-            foreach (var folder in picked) sprites.AddRange(folder.files);
-            return sprites;
-        }
-
         /// <summary>설정에 적힌 이름을 실제 패턴 목록으로 바꾼다. 모르는 이름은 건너뛴다.</summary>
-        public List<KeywordMotion> ResolveMotions()
+        public List<KeywordMotion> ResolveMotions() => ResolveMotions(motions);
+
+        public static List<KeywordMotion> ResolveMotions(string[] names)
         {
             var result = new List<KeywordMotion>();
 
-            if (motions != null)
+            if (names != null)
             {
-                foreach (string name in motions)
+                foreach (string name in names)
                 {
                     if (Enum.TryParse(name, true, out KeywordMotion motion) && !result.Contains(motion))
                         result.Add(motion);
@@ -355,90 +349,6 @@ namespace StoryRest.Keyword
                 if (gradient != null && gradient.TryResolve(out var a, out var b)) result.Add((a, b));
             }
             return result;
-        }
-
-        public List<Color> ResolveColors()
-        {
-            var result = new List<Color>();
-
-            if (colors != null)
-            {
-                foreach (string hex in colors)
-                {
-                    if (!string.IsNullOrWhiteSpace(hex) && ColorUtility.TryParseHtmlString(hex.Trim(), out Color color))
-                        result.Add(color);
-                }
-            }
-
-            if (result.Count == 0) result.Add(Color.white);
-            return result;
-        }
-    }
-
-    /// <summary>
-    /// floor_&lt;N&gt;/keywords.txt 에서 낱말을 읽는다. 한 줄에 하나, `#` 로 시작하는 줄은 주석.
-    ///
-    /// 콘텐츠와 같은 층 폴더에 두어 층마다 다른 낱말을 쓸 수 있게 한다.
-    /// 메모장으로 고칠 수 있어야 하므로 json 이 아니라 평문이다.
-    /// </summary>
-    public static class KeywordList
-    {
-        public const string FileName = "keywords.txt";
-
-        public static List<string> Load(string contentRoot)
-        {
-            var words = new List<string>();
-
-            if (string.IsNullOrEmpty(contentRoot)) return words;
-
-            string path = System.IO.Path.Combine(contentRoot, FileName);
-
-            if (!File.Exists(path))
-            {
-                Debug.LogWarning($"[Keyword] 낱말 파일이 없어 예시로 새로 만듭니다: {path}");
-                CreateSample(path);
-            }
-
-            try
-            {
-                foreach (string raw in File.ReadAllLines(path))
-                {
-                    string line = raw.Trim();
-                    if (line.Length == 0 || line.StartsWith("#")) continue;
-                    words.Add(line);
-                }
-            }
-            catch (Exception e)
-            {
-                Debug.LogError($"[Keyword] 낱말 파일을 읽지 못했습니다: {path}\n{e.Message}");
-            }
-
-            Debug.Log($"[Keyword] 낱말 {words.Count}개를 읽었습니다: {path}");
-            return words;
-        }
-
-        static void CreateSample(string path)
-        {
-            try
-            {
-                string directory = System.IO.Path.GetDirectoryName(path);
-                if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
-                    Directory.CreateDirectory(directory);
-
-                File.WriteAllText(path,
-                    "# 벽면에 떠다닐 낱말을 한 줄에 하나씩 적습니다.\n" +
-                    "# 이 줄처럼 #으로 시작하면 주석입니다.\n" +
-                    "# 파일을 고친 뒤에는 프로그램을 다시 시작하세요.\n" +
-                    "\n" +
-                    "중력\n원소\n분자\n결정\n파장\n스펙트럼\n대류\n마찰\n관성\n" +
-                    "광합성\n세포\n유전자\n진화\n생태계\n" +
-                    "지층\n화산\n대기\n해류\n" +
-                    "은하\n항성\n중성자\n블랙홀\n");
-            }
-            catch (Exception e)
-            {
-                Debug.LogWarning($"[Keyword] 예시 낱말 파일을 만들지 못했습니다: {e.Message}");
-            }
         }
     }
 }
