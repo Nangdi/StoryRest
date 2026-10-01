@@ -205,7 +205,7 @@
 | `ArUcoMarkerTracker` | 캡처 + 검출 + 꼭짓점 스무딩 | **수정** (세트별 인스턴스화, 스레드화) |
 | `ArUcoContentLibrary` | 경로 → 영상 텍스처. AVPro 플레이어 풀 | **신규** (`ArUcoImageLibrary` 대체) |
 | `ArUcoImageCache` | 경로 → 이미지 텍스처. 비동기 로드 + LRU. 세트 공유 | **신규** |
-| `ArUcoViewCounter` | 마커 관람 판정(유지 시간 · 복귀 유예). 세트별 | **신규** |
+| `ArUcoViewCounter` | 마커 관람 판정(유지 시간 · 관람 기록 유예). 세트별 | **신규** |
 | `ArUcoAppearTracker` (`ArUcoAppear.cs`) | 등장 연출 상태(움직임 → 멈춤 판정 → 읽는 중 → 뜸)와 연출 함수. 세트별 | **신규** |
 | `ViewLog` (`Stats/`) | 관람 건별 CSV append/읽기. `persistentDataPath/stats/`. `Recorded` / `DayRewritten` 이벤트 | **신규** |
 | `ViewStatsServer` (`Stats/`) | role=aruco. TCP 로 대기, 적힌 줄을 그대로 월 PC 에 보냄. `sync` 요청에 하루치 응답 | **신규** |
@@ -406,6 +406,7 @@ ArUco PC 한 대가 세트 2개를 도는 구성에서 가장 크게 절약되�
 
       "viewMinDwellSeconds": 1.0,
       "viewResumeGraceSeconds": 20.0,
+      "videoResumeGraceSeconds": 20.0,
       "recordViews": true,
 
       "globalScale": 1.0,
@@ -457,7 +458,8 @@ ArUco PC 한 대가 세트 2개를 도는 구성에서 가장 크게 절약되�
 |---|---|---|
 | 콘텐츠 유지 | `holdSeconds` | 즉시 |
 | 관람 최소 유지 | `viewMinDwellSeconds` | 즉시 |
-| 놓침 복귀 유예 | `viewResumeGraceSeconds` | 즉시 (영상 유지 + 관람 판정) |
+| 영상 이어보기 유예 | `videoResumeGraceSeconds` | 즉시 (영상 이어 틀기 · 등장 연출 생략) |
+| 관람 기록 유예 | `viewResumeGraceSeconds` | 즉시 (관람 판정) |
 | 움직임 부드럽게 | `smoothing` | 즉시 |
 | 영상 반복 시작 | `videoLoopStartSeconds` | 다음 반복부터. 끝나면 이 초로 돌아간다(→ SPEC §5) |
 | 정지 고정 | `stillThresholdPixels` | 즉시. 네 꼭짓점이 모두 이 픽셀 안에서만 흔들리면 자리를 잠그고 검출값을 평균해 수렴시킨다. `smoothing` 은 떨림을 늦출 뿐이라 가만히 놓인 마커의 떨림은 이걸로 잡는다 |
@@ -514,7 +516,7 @@ ArUcoContentLibrary
 
 - 풀 크기는 설정값. 기본은 세트당 4 정도로 두고 현장에서 조정한다.
 - **놓침과 끝남을 나눈다**(→ SPEC §5 재생 정책). `EndFrame()` 에서 이번 프레임에 그려지지 않은 슬롯은
-  `Pause()` 만 하고, `viewResumeGraceSeconds` 를 넘긴 슬롯만 반납한다(`Pause` + `Rewind`).
+  `Pause()` 만 하고, `videoResumeGraceSeconds` 를 넘긴 슬롯만 반납한다(`Pause` + `Rewind`).
   다시 요청되면 `TryGetFrame` 이 `Play()` 로 그 자리에서 이어 튼다. 파일은 닫지 않는다 — 여는 비용을 아낀다.
 - **반복 구간**(→ SPEC §5): 기본은 `ArUcoConfig.videoLoopStartSeconds`. 파일 이름의 `_loop<초>` 를
   `ArUcoContentIndex` 가 `ContentEntry.loopStart` 로 읽으면 그 영상만 그 값(`ArUcoSet.LoopStartOf`).
@@ -628,7 +630,7 @@ ArUcoImageCache (StoryRestApp 이 하나만 만들어 모든 세트가 공유)
 ```
 
 - 읽는 중에 다시 움직이면 무효 — 멈춘 뒤 처음부터 읽는다.
-- 추적기 목록에서 빠진 뒤에도 `viewResumeGraceSeconds` 동안은 상태를 기억한다. 그 안에 돌아오면 같은 관람이므로
+- 추적기 목록에서 빠진 뒤에도 `videoResumeGraceSeconds` 동안은 상태를 기억한다. 그 안에 돌아오면 이어 보는 것이므로
   다시 연출하지 않고 바로 뜬다(영상이 멈춘 자리에서 이어지는 것과 같은 규칙). 읽던 중이었으면 놓은 순간부터 다시.
 - 속도는 `ArUcoMarkerTracker` 의 보간된 중심으로 잰다(마커 한 변 = 1). 마커 크기가 달라도 같은 값을 쓴다.
 - 편집모드에서는 끈다(`ArUcoSet.SuppressAppear`) — 배치를 맞추는 동안 옮길 때마다 기다릴 수는 없다.

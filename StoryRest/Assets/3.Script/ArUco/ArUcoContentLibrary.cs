@@ -56,7 +56,7 @@ namespace StoryRest.ArUco
         float _resumeGrace;
 
         /// <summary>
-        /// 마커가 사라진 뒤 슬롯을 붙잡아 두는 시간(→ ArUcoConfig.viewResumeGraceSeconds).
+        /// 마커가 사라진 뒤 슬롯을 붙잡아 두는 시간(→ ArUcoConfig.videoResumeGraceSeconds).
         /// 그 안에 돌아오면 멈춰 있던 자리에서 이어서 돌고, 넘기면 되감아 다음 관람은 처음부터 본다.
         /// </summary>
         public float ResumeGraceSeconds

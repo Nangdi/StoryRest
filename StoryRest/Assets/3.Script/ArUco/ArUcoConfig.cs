@@ -376,13 +376,20 @@ namespace StoryRest.ArUco
         // 그 전에 사라지면 책장을 넘기다 스친 것이거나 오인식으로 보고 세지 않는다.
         public float viewMinDwellSeconds = 1f;
 
-        // 마커를 놓친 뒤 이 시간 안에 다시 잡히면 같은 관람이다 — 영상은 멈춘 자리에서 이어서 돈다.
-        // 넘기면 관람이 끝난 것이다 — 기록을 남기고 영상은 처음으로 되감는다.
-        // holdSeconds(콘텐츠를 계속 그려 두는 시간)보다 길어야 한다. 그 사이에는 콘텐츠가 숨고 영상만 멈춰 있다.
+        // 관람 기록 유예. 마커를 놓친 뒤 이 시간 안에 다시 잡히면 같은 관람 1회로 이어서 센다.
+        // 넘기면 관람이 끝난 것이다 — 그때 한 건을 기록한다. 순위에 반영되는 시점도 그만큼 뒤다.
         //
         // 20초 — 책장을 넘기거나 옆 사람과 얘기하다 돌아오는 시간을 넉넉히 덮는다. 그보다 길면
-        // 다음 관람객이 앞사람이 보던 중간부터 보게 되고 그 사람은 세어지지 않는다.
+        // 다음 관람객의 관람이 앞사람 것에 합쳐져 세어지지 않는다.
         public float viewResumeGraceSeconds = 20f;
+
+        // 영상 이어보기 유예. 마커를 놓친 뒤 이 시간 안에 다시 잡히면 영상은 멈춘 자리에서 이어서 돌고,
+        // 등장 연출(빛 고리)도 다시 하지 않는다. 넘기면 영상은 처음으로 되감고 다음엔 연출부터 다시 한다.
+        // holdSeconds(콘텐츠를 계속 그려 두는 시간)보다 길어야 한다. 그 사이에는 콘텐츠가 숨고 영상만 멈춰 있다.
+        //
+        // 관람 기록 유예와 따로 둔다(2026-10-01) — "같은 관람으로 셀지" 와 "영상을 이어서 틀지" 는 현장에서 다르게 맞출 수 있다.
+        // 파일에 없으면(예전 설정) -1 로 읽혀 관람 기록 유예 값을 그대로 쓴다.
+        public float videoResumeGraceSeconds = -1f;
 
         // 영상이 끝나면 돌아갈 시각(초) — 도입부 + 반복 구간으로 만든 영상의 반복 구간 시작(→ SPEC §5).
         // 모든 영상을 같은 틀로 만들므로 여기 한 값으로 맞춘다. 파일 이름의 "_loop<초>" 가 있으면 그 영상만 그 값을 쓴다.
@@ -511,6 +518,8 @@ namespace StoryRest.ArUco
             viewMinDwellSeconds = Mathf.Max(0f, viewMinDwellSeconds);
             // hold 안에 돌아오는 것은 놓친 적도 없는 것이다. grace 가 그보다 짧으면 의미가 없다.
             viewResumeGraceSeconds = Mathf.Max(holdSeconds, viewResumeGraceSeconds);
+            if (videoResumeGraceSeconds < 0f) videoResumeGraceSeconds = viewResumeGraceSeconds;
+            videoResumeGraceSeconds = Mathf.Max(holdSeconds, videoResumeGraceSeconds);
             manualTargetSize = Mathf.Clamp(manualTargetSize, MinManualTargetSize, MaxManualTargetSize);
             appear ??= new AppearConfig();
             appear.Validate();

@@ -122,7 +122,7 @@ namespace StoryRest.ArUco
             if (config.recordViews)
                 _views = new ArUcoViewCounter(floor, set.name, config.viewMinDwellSeconds, config.viewResumeGraceSeconds);
 
-            _appear = new ArUcoAppearTracker(config.appear) { GraceSeconds = config.viewResumeGraceSeconds };
+            _appear = new ArUcoAppearTracker(config.appear) { GraceSeconds = config.videoResumeGraceSeconds };
 
             // 화면은 프리팹이 들고 있다(→ ARCHITECTURE §3). 세트 프리팹의 뿌리에 이미 붙어 있는 것을 쓴다.
             _view = GetComponent<ArUcoProjectionView>();
@@ -139,7 +139,7 @@ namespace StoryRest.ArUco
             // 영상 슬롯은 세트마다 따로 갖는다. 세트가 둘이면 디코더도 그만큼 늘어나므로
             // maxConcurrentVideos 는 "세트 하나당" 상한이라는 점에 유의한다.
             _library = new ArUcoContentLibrary(
-                transform, config.maxConcurrentVideos, config.viewResumeGraceSeconds);
+                transform, config.maxConcurrentVideos, config.videoResumeGraceSeconds);
 
             // 검출기는 세트마다 별도 인스턴스다. 같은 GameObject 에 둘을 붙일 수 없으므로
             // (DisallowMultipleComponent) 세트가 각자의 GameObject 를 갖는 구조여야 한다.
@@ -187,7 +187,7 @@ namespace StoryRest.ArUco
             if (_tracker == null || _library == null || _config == null) return;
 
             ApplyConfigToTracker();
-            _library.ResumeGraceSeconds = _config.viewResumeGraceSeconds;
+            _library.ResumeGraceSeconds = _config.videoResumeGraceSeconds;
 
             if (_config.recordViews && _views == null)
             {
@@ -208,7 +208,7 @@ namespace StoryRest.ArUco
             if (_appear != null)
             {
                 _appear.Config = _config.appear;
-                _appear.GraceSeconds = _config.viewResumeGraceSeconds;
+                _appear.GraceSeconds = _config.videoResumeGraceSeconds;
             }
         }
 

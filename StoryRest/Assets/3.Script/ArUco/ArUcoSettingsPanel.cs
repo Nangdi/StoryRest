@@ -317,9 +317,13 @@ namespace StoryRest.ArUco
                 () => config.viewMinDwellSeconds, v => config.viewMinDwellSeconds = v,
                 "이 시간 이상 잡혀야 관람 1회로 센다.");
 
-            FloatRow(parent, "놓침 복귀 유예  viewResumeGraceSeconds", 1f, 60f, 1f, "0",
+            FloatRow(parent, "영상 이어보기 유예  videoResumeGraceSeconds", 1f, 60f, 1f, "0",
+                () => config.videoResumeGraceSeconds, v => config.videoResumeGraceSeconds = Mathf.Max(config.holdSeconds, v),
+                "놓친 뒤 이 시간 안에 돌아오면 영상은 멈춘 자리에서 이어서 · 연출 없이 바로. 넘기면 다음엔 처음부터.");
+
+            FloatRow(parent, "관람 기록 유예  viewResumeGraceSeconds", 1f, 60f, 1f, "0",
                 () => config.viewResumeGraceSeconds, v => config.viewResumeGraceSeconds = Mathf.Max(config.holdSeconds, v),
-                "놓친 뒤 이 시간 안에 돌아오면 같은 관람 · 영상은 멈춘 자리에서 이어서.");
+                "놓친 뒤 이 시간 안에 돌아오면 같은 관람 1회로 센다. 넘기면 그때 한 건을 기록한다(순위 반영도 그만큼 뒤).");
 
             FloatRow(parent, "움직임 부드럽게  smoothing", 0f, 0.95f, 0.05f, "0.00",
                 () => config.smoothing, v => config.smoothing = v,

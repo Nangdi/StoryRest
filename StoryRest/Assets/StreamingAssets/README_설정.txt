@@ -67,7 +67,9 @@ keywordwall.json 은 예외로 이 폴더의 것을 바로 읽습니다.
   smoothing              마커 움직임 부드럽기. 0 = 즉시(떨림), 클수록 부드럽지만 늦게 따라옴.
   holdSeconds            마커를 놓친 뒤 콘텐츠를 몇 초 더 그려 둘지 (손이 스칠 때 깜빡임 방지).
   viewMinDwellSeconds    이 시간 이상 잡혀야 관람 1회로 셈.
-  viewResumeGraceSeconds 놓친 뒤 이 시간 안에 돌아오면 같은 관람 · 영상은 멈춘 자리에서 이어서. 넘기면 처음으로.
+  videoResumeGraceSeconds 영상 이어보기 유예. 놓친 뒤 이 시간 안에 돌아오면 영상은 멈춘 자리에서 이어서 · 연출 없이 바로.
+                         넘기면 다음엔 처음부터. 없으면 viewResumeGraceSeconds 값을 따름.
+  viewResumeGraceSeconds 관람 기록 유예. 놓친 뒤 이 시간 안에 돌아오면 같은 관람 1회. 넘기면 그때 기록을 남김.
   recordViews            관람 기록을 파일로 남길지.
   showEmptyGuide         콘텐츠(video/)가 없는 마커에 "N번 마커 · 콘텐츠가 없습니다" 안내를 띄울지. 설치·점검용, 전시 중엔 false.
   maxSimultaneous        세트 하나가 동시에 띄울 마커 수. 0 = 제한 없음.
@@ -154,7 +156,7 @@ keywordwall.json 은 예외로 이 폴더의 것을 바로 읽습니다.
 ESC 로 열고 닫습니다. 값을 움직이면 바로 적용되고 1초 뒤 aruco.json 에 저장됩니다.
 
   ArUco — 현장 조절값
-    콘텐츠 유지 · 관람 최소 유지 · 놓침 복귀 유예 · 움직임 부드럽게 · 동시 표시 마커 수 · 원근 매핑 · 관람 기록
+    콘텐츠 유지 · 관람 최소 유지 · 영상 이어보기 유예 · 관람 기록 유예 · 움직임 부드럽게 · 동시 표시 마커 수 · 원근 매핑 · 관람 기록
   등장 연출
     켜기 · 연출 종류 · 빛 고리 · 읽는 시간 · 등장 시간 · 멈춤 판정 · 움직임 기준
   화면 · 카메라 배정 (aruco.json · keywordwall.json) — 재시작해야 적용

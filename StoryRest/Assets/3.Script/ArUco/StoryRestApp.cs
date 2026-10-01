@@ -510,7 +510,7 @@ namespace StoryRest.ArUco
             else
                 text.Append(Config.recordViews
                     ? $"  관람 기록: {ViewLog.Directory} " +
-                      $"(유지 {Config.viewMinDwellSeconds:0.#}초 이상 · 복귀 {Config.viewResumeGraceSeconds:0.#}초 이내)"
+                      $"(유지 {Config.viewMinDwellSeconds:0.#}초 이상 · 복귀 {Config.viewResumeGraceSeconds:0.#}초 이내 · 영상 이어보기 {Config.videoResumeGraceSeconds:0.#}초)"
                     : "  관람 기록: 꺼짐 (recordViews)");
 
             Debug.Log(text.ToString());
