@@ -3,80 +3,153 @@
     "walls": [
         {
             "displayIndex": 1,
-            "floors": [1],
-            "roles": ["all"],
-            "liveSets": ["A"],
+            "floors": [
+                1
+            ],
+            "roles": [
+                "all"
+            ],
+            "liveSets": [
+                "A"
+            ],
             "rank": "month"
         },
         {
             "displayIndex": 2,
-            "floors": [1],
-            "roles": ["all"],
-            "liveSets": ["B"],
+            "floors": [
+                1
+            ],
+            "roles": [
+                "all"
+            ],
+            "liveSets": [
+                "B"
+            ],
             "rank": "week"
         },
         {
             "displayIndex": 2,
-            "floors": [2, 3],
-            "roles": ["all"],
-            "liveSets": ["A"],
+            "floors": [
+                2,
+                3
+            ],
+            "roles": [
+                "all"
+            ],
+            "liveSets": [
+                "A"
+            ],
             "rank": "month"
         },
         {
             "displayIndex": 3,
-            "floors": [2, 3],
-            "roles": ["all"],
-            "liveSets": ["B"],
+            "floors": [
+                2,
+                3
+            ],
+            "roles": [
+                "all"
+            ],
+            "liveSets": [
+                "B"
+            ],
             "rank": "week"
         },
         {
             "displayIndex": 0,
-            "floors": [2, 3],
-            "roles": ["wall"],
-            "liveSets": ["A"],
+            "floors": [
+                2,
+                3
+            ],
+            "roles": [
+                "wall"
+            ],
+            "liveSets": [
+                "A"
+            ],
             "rank": "month"
         },
         {
             "displayIndex": 1,
-            "floors": [2, 3],
-            "roles": ["wall"],
-            "liveSets": ["B"],
+            "floors": [
+                2,
+                3
+            ],
+            "roles": [
+                "wall"
+            ],
+            "liveSets": [
+                "B"
+            ],
             "rank": "week"
         }
     ],
     "floorGradients": [
         {
-            "floors": [1],
+            "floors": [
+                1
+            ],
             "gradients": [
-                { "from": "#704976", "to": "#B07CB8" },
-                { "from": "#5C3D7A", "to": "#A97FC0" },
-                { "from": "#704976", "to": "#C08AA6" }
+                {
+                    "from": "#704976",
+                    "to": "#B07CB8"
+                },
+                {
+                    "from": "#5C3D7A",
+                    "to": "#A97FC0"
+                },
+                {
+                    "from": "#704976",
+                    "to": "#C08AA6"
+                }
             ]
         },
         {
-            "floors": [2],
+            "floors": [
+                2
+            ],
             "gradients": [
-                { "from": "#9B3526", "to": "#D9724F" },
-                { "from": "#8A2E3A", "to": "#D35C4A" },
-                { "from": "#9B3526", "to": "#E09A55" }
+                {
+                    "from": "#9B3526",
+                    "to": "#D9724F"
+                },
+                {
+                    "from": "#8A2E3A",
+                    "to": "#D35C4A"
+                },
+                {
+                    "from": "#9B3526",
+                    "to": "#E09A55"
+                }
             ]
         },
         {
-            "floors": [3],
+            "floors": [
+                3
+            ],
             "gradients": [
-                { "from": "#08725D", "to": "#3FB59A" },
-                { "from": "#0A6470", "to": "#3AAE8F" },
-                { "from": "#08725D", "to": "#7BC67A" }
+                {
+                    "from": "#08725D",
+                    "to": "#3FB59A"
+                },
+                {
+                    "from": "#0A6470",
+                    "to": "#3AAE8F"
+                },
+                {
+                    "from": "#08725D",
+                    "to": "#7BC67A"
+                }
             ]
         }
     ],
     "gradientPick": "random",
     "spriteGradientAngle": 0.0,
-    "minSpeed": 0.012,
-    "maxSpeed": 0.04,
-    "minAlpha": 0.55,
-    "maxAlpha": 0.95,
-    "fadeSeconds": 1.8,
+    "minSpeed": 0.012000000104308129,
+    "maxSpeed": 0.06499999761581421,
+    "minAlpha": 0.550000011920929,
+    "maxAlpha": 0.949999988079071,
+    "fadeSeconds": 1.7999999523162842,
     "motions": [
         "Drift",
         "Wave",
@@ -85,22 +158,22 @@
         "Zigzag"
     ],
     "separation": 0.5,
-    "separationPadding": 1.15,
-    "edgeMargin": 0.03,
+    "separationPadding": 1.149999976158142,
+    "edgeMargin": 0.029999999329447748,
     "questions": {
         "minRotateSeconds": 120.0,
         "maxRotateSeconds": 180.0,
         "liveSeconds": 30.0,
         "maxTags": 8,
         "refreshSeconds": 60.0,
-        "questionScale": 0.9,
+        "questionScale": 0.8999999761581421,
         "titleScale": 1.0,
         "titleGap": 11.0,
         "titleColor": "#5D5E5E",
-        "minTagHeight": 56.0,
-        "maxTagHeight": 72.0,
-        "minQuestionSpeed": 0.004,
-        "maxQuestionSpeed": 0.012,
+        "minTagHeight": 38.0,
+        "maxTagHeight": 54.0,
+        "minQuestionSpeed": 0.004000000189989805,
+        "maxQuestionSpeed": 0.02500000037252903,
         "questionMotions": [
             "Drift",
             "Bob"
@@ -109,19 +182,28 @@
         "titles": [
             {
                 "kind": "week",
-                "files": ["09_이번 주 호기심 1위.png"]
+                "files": [
+                    "09_이번 주 호기심 1위.png"
+                ]
             },
             {
                 "kind": "month",
-                "files": ["08_이번 달 호기심 1위.png"]
+                "files": [
+                    "08_이번 달 호기심 1위.png"
+                ]
             },
             {
                 "kind": "live",
-                "files": ["07_지금 누군가가 궁금해한 질문.png"]
+                "files": [
+                    "07_지금 누군가가 궁금해한 질문.png"
+                ]
             },
             {
                 "kind": "least",
-                "files": ["06_아직 만나보지 못한 질문.png", "05_이 질문의 첫 탐험가를 찾습니다.png"]
+                "files": [
+                    "06_아직 만나보지 못한 질문.png",
+                    "05_이 질문의 첫 탐험가를 찾습니다.png"
+                ]
             },
             {
                 "kind": "random",

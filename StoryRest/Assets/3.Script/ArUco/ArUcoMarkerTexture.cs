@@ -66,12 +66,23 @@ namespace StoryRest.ArUco
             }
         }
 
+        // 마커 주변의 흰 여백(quiet zone)은 장식이 아니라 검출의 일부다. 없으면 인식되지 않는다.
+        static int QuietZone(int sizePx) => Mathf.Max(4, sizePx / 8);
+
+        /// <summary>
+        /// 텍스처 한 변 중 마커(검은 테두리 바깥선까지)가 차지하는 비율. 나머지는 흰 여백이다.
+        /// 자동 보정이 투사한 마커의 꼭짓점이 화면 어디에 있는지 계산할 때 쓴다.
+        /// </summary>
+        public static float MarkerFraction(int sizePx = 256)
+        {
+            sizePx = Mathf.Clamp(sizePx, 32, 1024);
+            return (float)sizePx / (sizePx + 2 * QuietZone(sizePx));
+        }
+
         static Texture2D Create(int dictionaryId, int markerId, int sizePx)
         {
             sizePx = Mathf.Clamp(sizePx, 32, 1024);
-
-            // 마커 주변의 흰 여백(quiet zone)은 장식이 아니라 검출의 일부다. 없으면 인식되지 않는다.
-            int quiet = Mathf.Max(4, sizePx / 8);
+            int quiet = QuietZone(sizePx);
 
             Dictionary dictionary = null;
             Mat markerMat = null;

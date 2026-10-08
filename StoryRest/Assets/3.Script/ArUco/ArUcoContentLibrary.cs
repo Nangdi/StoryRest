@@ -93,6 +93,20 @@ namespace StoryRest.ArUco
             player.AudioMuted = true;
             player.AudioVolume = 0f;
 
+            // 영상은 책자 위 작은 판으로 크게 줄여 그려지고, 마커 평면을 따라 비스듬히 눕는다.
+            // 밉맵이 없으면 줄일 때 픽셀을 건너뛰어 계단 · 지글거림이 생기고,
+            // 비스듬한 면은 비등방 필터가 없으면 한쪽 방향으로 뭉개진다.
+            // 밉맵 옵션은 플레이어가 만들어질 때만 읽히므로 Awake 전에 넣는다.
+            player.PlatformOptionsWindows.useTextureMips = true;
+            player.TextureFilterMode = FilterMode.Trilinear;
+            player.TextureAnisoLevel = 8;
+
+            // 겹치는 콘텐츠 아래가 비쳐 보여야 하는 영상은 Hap Alpha(.mov)로 받는다.
+            // 윈도우에는 ProRes 디코더가 없어 ProRes 4444 는 열리지 않고, H.264 는 알파를 못 담는다.
+            // Hap 은 AVPro 자체 디코더로 열고, 알파는 버리지 않고 텍스처에 남긴다. 일반 MP4 는 영향 없다.
+            player.PlatformOptionsWindows.useHapNotchLC = true;
+            player.PlatformOptionsWindows.hintAlphaChannel = true;
+
             go.SetActive(true);
 
             return new Slot { player = player };

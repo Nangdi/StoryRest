@@ -37,24 +37,99 @@ namespace StoryRest.ArUco
     }
 
     /// <summary>
-    /// 카메라 픽셀 → 프로젝터 픽셀 변환(H_camproj)을 결정하는 네 쌍의 대응점.
+    /// 카메라 픽셀 → 프로젝터 픽셀 변환(H_camproj)을 결정하는 대응점.
     ///
     /// 카메라와 프로젝터는 위치도 렌즈도 다른 별개의 장치라, 카메라가 마커를 본 좌표를
-    /// 그대로 투사 좌표로 쓸 수 없다. 투사면이 평면이므로 대응점 4쌍이면 변환이 완전히 결정된다.
-    /// 자세한 배경은 docs/ARCHITECTURE.md §1.
+    /// 그대로 투사 좌표로 쓸 수 없다. 투사면이 평면이므로 대응점 4쌍이면 변환이 결정되지만,
+    /// 카메라 렌즈의 휨까지 잡으려면 점을 더 찍는다(격자 보정). 자세한 배경은 docs/ARCHITECTURE.md §1.
     /// </summary>
     [Serializable]
     public class CalibrationConfig
     {
-        // 출력 해상도를 1 로 보는 정규화 좌표. 프로젝터 해상도가 바뀌어도 값이 유지된다.
-        // 가장자리는 렌즈 왜곡이 크고 카메라 시야를 벗어나기 쉬워 안쪽으로 들여 잡는다.
+        // 보정 자리 사각형의 네 귀퉁이(좌상 → 우상 → 우하 → 좌하). 출력 해상도를 1 로 보는 정규화 좌표.
+        // 자동 보정은 이 네 점에 마커를 쏘고, 수동 보정은 이 사각형을 gridSize × gridSize 로 나눈 점을 짚는다.
+        // 책자가 놓이는 영역을 덮도록 현장에서 옮긴다 — 보정은 점들이 둘러싼 안쪽에서 가장 정확하다.
         public Vector2[] projectorPoints = DefaultProjectorPoints();
 
-        // 위 네 점이 카메라 영상의 어디에 찍혔는지(카메라 픽셀). 캘리브레이션이 채운다.
+        // 예전 4점 보정의 카메라 값. 아래 pair* 가 비어 있을 때만 projectorPoints 와 짝지어 쓴다.
         public Vector2[] cameraPoints = new Vector2[0];
+
+        // 수동 보정에서 짚을 격자 한 변의 점 수. 2 = 네 귀퉁이만(예전 방식), 3 = 9점, 4 = 16점.
+        // 점이 많을수록 카메라 렌즈의 휨이 위치마다 고르게 잡힌다.
+        public int gridSize = 3;
+
+        public const int MinGridSize = 2;
+        public const int MaxGridSize = 5;
+
+        // 자동 보정에서 투사할 마커의 화면상 크기(짧은 변 기준 비율, 흰 여백 포함).
+        public float autoMarkerSize = 0.18f;
+
+        public const float MinAutoMarkerSize = 0.04f;
+        public const float MaxAutoMarkerSize = 0.4f;
+
+        // 보정으로 얻은 대응점 전부. 같은 순번끼리 짝이다.
+        // pairsPerPoint 개씩 묶여 "보정 점 하나" 를 이룬다 — 수동은 마커 중심 1개, 자동은 투사 마커 꼭짓점 4개.
+        public Vector2[] pairCamera = new Vector2[0];       // 카메라 픽셀
+        public Vector2[] pairProjector = new Vector2[0];    // 프로젝터 정규화 좌표
+        public int pairsPerPoint = 1;
+
+        // 대응점을 어떤 모양의 변환으로 맞출지(2026-10-06).
+        //   "square" — 이동 · 회전 · 균일 크기만. 정사각형은 어디서나 같은 크기의 정사각형으로 남는다.
+        //              점마다 짚은 오차는 평균으로 흡수된다. 장비가 비스듬하면 가장자리에 그만큼 오차가 남는다.
+        //   "plane"  — 평면 변환(호모그래피). 선은 곧게 남지만 비스듬한 설치의 사다리꼴 기울기까지 따른다.
+        //   "warp"   — plane + 점마다 남는 렌즈 휨 보간. 보정 점 위에서는 정확히 맞는다(기본).
+        //              대신 짚을 때의 오차도 그대로 따라가므로 마커를 사각형에 정확히 맞춰 짚어야 한다.
+        //
+        // 기본은 "warp" 다(2026-10-06, 현장 판단 — "3×3 으로 보정했으면 그 9자리에서는 정확해야 한다").
+        // 콘텐츠 모양은 이 값과 무관하게 늘 반듯한 고정 크기 직사각형으로 그려진다(→ flatMarkerSize).
+        public string model = ModelWarp;
+
+        public const string ModelSquare = "square";
+        public const string ModelPlane = "plane";
+        public const string ModelWarp = "warp";
+
+        // 보정 위에 사람이 덧대는 세부 조정(2026-10-06). 보정이 구한 자리 전체를 통째로 옮기고 돌리고 키운다.
+        // 모양은 건드리지 않으므로 정사각형은 정사각형으로 남는다. 보정을 다시 해도 이 값은 남는다(R 로 0).
+        //   fineOffset   — 화면 높이를 1 로 보는 이동량(x 오른쪽, y 아래쪽)
+        //   fineRotation — 도, 시계 방향이 +
+        //   fineScale    — 배율. 기준점은 보정 자리 사각형의 가운데
+        //   fineTilt     — 원근 기울기(x: + 면 오른쪽이 넓어지고 왼쪽이 좁아진다, y: + 면 위쪽이 넓어진다).
+        //                  책상을 비스듬히 보는 설치에서 "한쪽 끝은 바깥으로, 반대쪽은 덜" 밀리는 어긋남을 잡는다.
+        //                  이것만은 정사각을 유지하지 않는다 — 원근 자체가 정사각을 사다리꼴로 만드는 일이다.
+        public Vector2 fineOffset = Vector2.zero;
+        public float fineRotation = 0f;
+        public float fineScale = 1f;
+        public Vector2 fineTilt = Vector2.zero;
+
+        public const float MaxFineTilt = 0.5f;
+
+        public bool HasFineAdjust => fineOffset != Vector2.zero || fineRotation != 0f || fineScale != 1f || fineTilt != Vector2.zero;
+
+        public void ResetFineAdjust()
+        {
+            fineOffset = Vector2.zero;
+            fineRotation = 0f;
+            fineScale = 1f;
+            fineTilt = Vector2.zero;
+        }
+
+        // 보정할 때의 프로젝터 화면비(가로/세로). 가로세로 거리를 화면 픽셀 비율대로 재는 데 쓴다.
+        public float projectorAspect = 16f / 9f;
 
         // 캘리브레이션을 마쳤는지. false 면 항등 변환으로 동작한다(정합은 안 맞지만 화면은 뜬다).
         public bool valid = false;
+
+        /// <summary>대응점 묶음이 온전히 들어 있는지(새 방식).</summary>
+        public bool HasPairs =>
+            pairCamera != null && pairProjector != null
+            && pairCamera.Length == pairProjector.Length
+            && pairsPerPoint >= 1 && pairCamera.Length % pairsPerPoint == 0
+            && pairCamera.Length / pairsPerPoint >= 4;
+
+        /// <summary>예전 4점 보정 값이 온전히 들어 있는지.</summary>
+        public bool HasLegacyPoints =>
+            projectorPoints != null && projectorPoints.Length == 4
+            && cameraPoints != null && cameraPoints.Length == 4;
 
         public static Vector2[] DefaultProjectorPoints()
         {
@@ -67,16 +142,14 @@ namespace StoryRest.ArUco
             };
         }
 
-        /// <summary>네 쌍이 모두 채워져 실제로 변환을 세울 수 있는 상태인지.</summary>
-        public bool IsUsable =>
-            valid
-            && projectorPoints != null && projectorPoints.Length == 4
-            && cameraPoints != null && cameraPoints.Length == 4;
+        /// <summary>대응점이 채워져 실제로 변환을 세울 수 있는 상태인지.</summary>
+        public bool IsUsable => valid && (HasPairs || HasLegacyPoints);
 
         public void Reset()
         {
             projectorPoints = DefaultProjectorPoints();
             ClearCameraPoints();
+            ResetFineAdjust();
         }
 
         /// <summary>
@@ -86,7 +159,26 @@ namespace StoryRest.ArUco
         public void ClearCameraPoints()
         {
             cameraPoints = new Vector2[0];
+            pairCamera = new Vector2[0];
+            pairProjector = new Vector2[0];
+            pairsPerPoint = 1;
             valid = false;
+        }
+
+        /// <summary>손으로 고친 json 이 범위를 벗어났으면 되돌린다.</summary>
+        public void Validate()
+        {
+            if (projectorPoints == null || projectorPoints.Length != 4) projectorPoints = DefaultProjectorPoints();
+            cameraPoints ??= new Vector2[0];
+            pairCamera ??= new Vector2[0];
+            pairProjector ??= new Vector2[0];
+            gridSize = Mathf.Clamp(gridSize, MinGridSize, MaxGridSize);
+            autoMarkerSize = Mathf.Clamp(autoMarkerSize, MinAutoMarkerSize, MaxAutoMarkerSize);
+            if (projectorAspect <= 0.1f || projectorAspect > 10f) projectorAspect = 16f / 9f;
+            if (model != ModelSquare && model != ModelPlane && model != ModelWarp) model = ModelWarp;
+            fineScale = Mathf.Clamp(fineScale, 0.5f, 2f);
+            fineRotation = Mathf.Clamp(fineRotation, -45f, 45f);
+            fineTilt = new Vector2(Mathf.Clamp(fineTilt.x, -MaxFineTilt, MaxFineTilt), Mathf.Clamp(fineTilt.y, -MaxFineTilt, MaxFineTilt));
         }
     }
 
@@ -353,8 +445,14 @@ namespace StoryRest.ArUco
         // 원근 격자 분할. 1 이면 대각선을 경계로 그림이 꺾여 보인다. 6 이상 권장.
         public int warpSubdivisions = 10;
 
-        // false 면 원근 없이 화면상 회전·크기만 맞춘다. 마커가 작아 심하게 떨릴 때의 대안.
-        public bool perspectiveMapping = true;
+        // 콘텐츠는 원근 없이 **위치 · 회전만** 마커와 보정을 따르고, 크기와 모양은 고정한다(2026-10-06, 현장 판단).
+        // 예전의 perspectiveMapping(원근 켜기) 스위치는 없앴다 — 사다리꼴 · 늘어남이 생기는 경로가 남지 않게.
+        // 영상은 프로젝터 화면 위의 반듯한 직사각형(원본 비율)으로, 크기는 아래 flatMarkerSize 기준으로 늘 같다.
+        //
+        // "마커 한 변" 으로 칠 고정 크기(화면 짧은 변 = 1). 배치값(크기 · 위치)은 이 길이를 1 로 본다.
+        // 0 이하이면 처음 읽을 때 manualTargetSize(보정 때 실물 마커에 맞춘 크기)로 채운다.
+        // 영상 크기는 이 값 x globalScale x 마커 · 파일 scale 이다. 현장에서는 이 값 대신 globalScale(+ / -)로 맞춘다.
+        public float flatMarkerSize = 0f;
 
         // 세트 하나가 동시에 표시할 최대 마커 수. 0 = 제한 없음.
         public int maxSimultaneous = 0;
@@ -367,7 +465,7 @@ namespace StoryRest.ArUco
         public int autoScanIntervalFrames = 0;
 
         // 세트 하나가 동시에 돌릴 영상 디코더 수. 층당 PC 1대 구성이라 상한을 둔다.
-        public int maxConcurrentVideos = 4;
+        public int maxConcurrentVideos = 8;
 
         // ---- 관람 기준 (→ SPEC §5 재생 정책, ARCHITECTURE §5 관람 기록) ----
         // 영상 재생 유지와 관람 카운트가 같은 값을 쓴다. "한 번 이어서 재생된 영상" 이 곧 "관람 1회" 다.
@@ -434,6 +532,15 @@ namespace StoryRest.ArUco
         public const float MinManualTargetSize = 0.02f;
         public const float MaxManualTargetSize = 0.5f;
 
+        // 책상 위 정사각형이 프로젝터 화면에서 가로 / 세로 몇 대 몇인지. 프로젝터가 비스듬히 비추면 화면에서 정사각형인 것이
+        // 책상 위에서는 직사각형으로 늘어난다. 책상 위에서 정사각형으로 보이도록 맞춘다
+        // (수동 보정 중 , / . — 놓을 자리 사각형, 마커 배치 중 [ / ] — 영상).
+        // 보정 사각형과 영상이 같은 값을 쓴다: 영상도 이 비율로 그려야 돌렸을 때 책상 위에서 찌그러지지 않는다.
+        public float manualTargetAspect = 1f;
+
+        public const float MinManualTargetAspect = 0.4f;
+        public const float MaxManualTargetAspect = 2.5f;
+
         // 켜면 에디터에서만 세트들을 한 화면에 좌우로 나눠 그린다. 빌드에서는 무시된다.
         //
         // 기본은 꺼 둔다. 나눠 그리면 세트 하나의 화면 비율이 실제 프로젝터와 달라져
@@ -450,7 +557,6 @@ namespace StoryRest.ArUco
         // 편집모드에서 키를 한 번 누를 때 움직이는 양. Shift 를 같이 누르면 줄어든다.
         public float adjustPositionStep = 0.02f;
         public float adjustScaleStep = 0.02f;
-        public float adjustRotationStep = 1f;
 
         // 설치할 수 있는 세트를 전부 적어 두고, 각 세트의 floors 로 층을 고른다.
         // 실제로 만들어지는 세트 수 = 이 층에서 쓰는 항목 수.
@@ -521,6 +627,9 @@ namespace StoryRest.ArUco
             if (videoResumeGraceSeconds < 0f) videoResumeGraceSeconds = viewResumeGraceSeconds;
             videoResumeGraceSeconds = Mathf.Max(holdSeconds, videoResumeGraceSeconds);
             manualTargetSize = Mathf.Clamp(manualTargetSize, MinManualTargetSize, MaxManualTargetSize);
+            if (flatMarkerSize <= 0f) flatMarkerSize = manualTargetSize;
+            flatMarkerSize = Mathf.Clamp(flatMarkerSize, 0.01f, 1f);
+            manualTargetAspect = Mathf.Clamp(manualTargetAspect, MinManualTargetAspect, MaxManualTargetAspect);
             appear ??= new AppearConfig();
             appear.Validate();
 
@@ -536,6 +645,7 @@ namespace StoryRest.ArUco
                 if (string.IsNullOrWhiteSpace(set.name)) set.name = ((char)('A' + i)).ToString();
                 set.camera ??= new CameraConfig();
                 set.calibration ??= new CalibrationConfig();
+                set.calibration.Validate();
                 set.markers ??= new List<MarkerConfig>();
                 set.globalScale = Mathf.Max(0.05f, set.globalScale);
 
@@ -557,7 +667,7 @@ namespace StoryRest.ArUco
                 // 캘리브레이션이 반쯤 채워진 상태로 남으면 엉뚱한 자리에 투사된다. 아예 무효로 돌린다.
                 if (set.calibration.valid && !set.calibration.IsUsable)
                 {
-                    problems.Add($"세트 '{set.name}' 의 캘리브레이션 대응점이 4쌍이 아닙니다. 다시 보정해야 합니다.");
+                    problems.Add($"세트 '{set.name}' 의 캘리브레이션 대응점이 온전하지 않습니다. 다시 보정해야 합니다.");
                     set.calibration.valid = false;
                 }
 

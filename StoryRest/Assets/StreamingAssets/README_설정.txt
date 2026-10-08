@@ -75,7 +75,7 @@ keywordwall.json 은 예외로 이 폴더의 것을 바로 읽습니다.
   maxSimultaneous        세트 하나가 동시에 띄울 마커 수. 0 = 제한 없음.
   perspectiveMapping     true = 원근까지 맞춤 / false = 회전·크기만 (마커가 작아 심하게 떨릴 때).
   warpSubdivisions       원근 격자 분할 수. 6 이상.
-  maxConcurrentVideos    세트당 동시에 돌릴 영상 수 (기본 4).
+  maxConcurrentVideos    세트당 동시에 돌릴 영상 수 (기본 8).
   maxCachedImages        메모리에 올려 둘 이미지 수 (기본 24).
   appear                 등장 연출. enabled / effect(none·grow·fade·topReveal·spiral·wave) / ring(빛 고리) /
                          recognizeSeconds(읽는 시간) / appearSeconds(등장 시간) / settleSeconds(멈춤 판정) /

@@ -60,6 +60,136 @@ public struct ArUcoHomography
         return m;
     }
 
+    /// <summary>
+    /// 대응점 N쌍(N ≥ 4)에 가장 잘 맞는 변환을 최소제곱으로 구한다. <paramref name="from"/>[i] 가 <paramref name="to"/>[i] 로 간다.
+    ///
+    /// 4쌍이면 FromUnitSquare 를 두 번 거친 것과 같은 답이 나오고, 그보다 많으면 점마다의 측정 오차가
+    /// 서로 상쇄된다. 좌표 크기가 다른 두 공간(카메라 픽셀 ↔ 0~1 정규화)을 그대로 풀면 수치가 나빠지므로
+    /// 양쪽을 원점 중심 · 평균거리 √2 로 맞춘 뒤 푼다(Hartley 정규화). 계산은 double 로 한다.
+    /// </summary>
+    /// <returns>점이 모자라거나 한 직선에 몰려 변환이 정해지지 않으면 false.</returns>
+    public static bool TryFit(Vector2[] from, Vector2[] to, out ArUcoHomography result)
+    {
+        result = new ArUcoHomography();
+
+        int n = from != null ? from.Length : 0;
+        if (n < 4 || to == null || to.Length != n) return false;
+
+        if (!TryNormalize(from, out double fx, out double fy, out double fs)) return false;
+        if (!TryNormalize(to, out double tx, out double ty, out double ts)) return false;
+
+        // u = (a x + b y + c) / (g x + h y + 1) 를 a x + b y + c - g x u - h y u = u 로 펴서 정규방정식을 쌓는다.
+        var ata = new double[8, 8];
+        var atb = new double[8];
+        var row = new double[8];
+
+        for (int i = 0; i < n; i++)
+        {
+            double x = (from[i].x - fx) * fs, y = (from[i].y - fy) * fs;
+            double u = (to[i].x - tx) * ts, v = (to[i].y - ty) * ts;
+
+            row[0] = x; row[1] = y; row[2] = 1; row[3] = 0; row[4] = 0; row[5] = 0; row[6] = -x * u; row[7] = -y * u;
+            Accumulate(ata, atb, row, u);
+
+            row[0] = 0; row[1] = 0; row[2] = 0; row[3] = x; row[4] = y; row[5] = 1; row[6] = -x * v; row[7] = -y * v;
+            Accumulate(ata, atb, row, v);
+        }
+
+        if (!TrySolve(ata, atb, 8)) return false;
+
+        // 정규화 공간의 해를 원래 좌표로 되돌린다: H = T_to⁻¹ · Hn · T_from
+        double[] hn = { atb[0], atb[1], atb[2], atb[3], atb[4], atb[5], atb[6], atb[7], 1 };
+        double[] tFrom = { fs, 0, -fs * fx, 0, fs, -fs * fy, 0, 0, 1 };
+        double[] tToInv = { 1 / ts, 0, tx, 0, 1 / ts, ty, 0, 0, 1 };
+        double[] h = Mul3(tToInv, Mul3(hn, tFrom));
+
+        if (System.Math.Abs(h[8]) < 1e-12) return false;
+
+        result._a = (float)(h[0] / h[8]); result._b = (float)(h[1] / h[8]); result._c = (float)(h[2] / h[8]);
+        result._d = (float)(h[3] / h[8]); result._e = (float)(h[4] / h[8]); result._f = (float)(h[5] / h[8]);
+        result._g = (float)(h[6] / h[8]); result._h = (float)(h[7] / h[8]);
+        result.IsValid = true;
+        return true;
+    }
+
+    static bool TryNormalize(Vector2[] points, out double cx, out double cy, out double scale)
+    {
+        cx = 0; cy = 0; scale = 0;
+        for (int i = 0; i < points.Length; i++) { cx += points[i].x; cy += points[i].y; }
+        cx /= points.Length;
+        cy /= points.Length;
+
+        double mean = 0;
+        for (int i = 0; i < points.Length; i++)
+        {
+            double dx = points[i].x - cx, dy = points[i].y - cy;
+            mean += System.Math.Sqrt(dx * dx + dy * dy);
+        }
+        mean /= points.Length;
+
+        if (mean < 1e-12) return false;   // 전부 한 점에 겹쳤다
+        scale = System.Math.Sqrt(2) / mean;
+        return true;
+    }
+
+    static void Accumulate(double[,] ata, double[] atb, double[] row, double rhs)
+    {
+        for (int r = 0; r < 8; r++)
+        {
+            if (row[r] == 0) continue;
+            for (int c = 0; c < 8; c++) ata[r, c] += row[r] * row[c];
+            atb[r] += row[r] * rhs;
+        }
+    }
+
+    static double[] Mul3(double[] a, double[] b)
+    {
+        var m = new double[9];
+        for (int r = 0; r < 3; r++)
+            for (int c = 0; c < 3; c++)
+                m[r * 3 + c] = a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c] + a[r * 3 + 2] * b[6 + c];
+        return m;
+    }
+
+    /// <summary>
+    /// 정사각 연립방정식 A x = b 를 부분 피벗 가우스 소거로 푼다. 답은 b 자리에 남는다.
+    /// 보정 계산(이 파일과 ArUcoProjection 의 왜곡 보간)이 같이 쓴다.
+    /// </summary>
+    /// <returns>A 가 특이(점이 한 직선에 몰린 경우 등)하면 false.</returns>
+    public static bool TrySolve(double[,] a, double[] b, int size)
+    {
+        for (int col = 0; col < size; col++)
+        {
+            int pivot = col;
+            for (int r = col + 1; r < size; r++)
+                if (System.Math.Abs(a[r, col]) > System.Math.Abs(a[pivot, col])) pivot = r;
+
+            if (System.Math.Abs(a[pivot, col]) < 1e-12) return false;
+
+            if (pivot != col)
+            {
+                for (int c = 0; c < size; c++) { double t = a[col, c]; a[col, c] = a[pivot, c]; a[pivot, c] = t; }
+                double tb = b[col]; b[col] = b[pivot]; b[pivot] = tb;
+            }
+
+            for (int r = col + 1; r < size; r++)
+            {
+                double k = a[r, col] / a[col, col];
+                if (k == 0) continue;
+                for (int c = col; c < size; c++) a[r, c] -= k * a[col, c];
+                b[r] -= k * b[col];
+            }
+        }
+
+        for (int r = size - 1; r >= 0; r--)
+        {
+            double sum = b[r];
+            for (int c = r + 1; c < size; c++) sum -= a[r, c] * b[c];
+            b[r] = sum / a[r, r];
+        }
+        return true;
+    }
+
     /// <summary>항등 변환. 아직 캘리브레이션하지 않은 구간에서 "아무것도 바꾸지 않음" 으로 쓴다.</summary>
     public static ArUcoHomography Identity()
     {

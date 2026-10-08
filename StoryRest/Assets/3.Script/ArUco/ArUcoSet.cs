@@ -329,7 +329,11 @@ namespace StoryRest.ArUco
 
                 var style = ArUcoDrawStyle.Default(
                     _set.globalScale, new Vector2(_set.globalOffsetX, _set.globalOffsetY),
-                    _config.warpSubdivisions, _config.perspectiveMapping);
+                    _config.warpSubdivisions);
+
+                // 위치 · 회전만 마커를 따르고 크기는 고정한다(→ ArUcoConfig.flatMarkerSize).
+                style.flatSide = _config.flatMarkerSize;
+                style.tableAspect = _config.manualTargetAspect;   // 책상 위 정사각형의 프로젝터 픽셀 비율
 
                 // 등장 연출: 움직이는 중·읽는 중이면 콘텐츠 대신 고리만(또는 아무것도) 그린다.
                 var appear = new AppearFrame { drawContent = true, ringT = -1f, appearT = 1f };
@@ -494,7 +498,7 @@ namespace StoryRest.ArUco
             // 격자는 화면 좌표를 직접 쓰므로 세트 공통 배치와 파일별 배치를 적용하지 않는다.
             // 여기서 확인하려는 것은 배치가 아니라 "파일이 제대로 들어갔는지" 다.
             var placement = ArUcoPlacement.Identity;
-            var style = ArUcoDrawStyle.Default(1f, Vector2.zero, _config.warpSubdivisions, false);
+            var style = ArUcoDrawStyle.Default(1f, Vector2.zero, _config.warpSubdivisions);
 
             for (int i = 0; i < _previewEntries.Count; i++)
             {
@@ -539,25 +543,15 @@ namespace StoryRest.ArUco
 
         /// <summary>
         /// 콘텐츠를 얹을 평면을 세운다. 단위 정사각형이 마커 자리에 오도록 맞춘 호모그래피다.
+        ///
+        /// 실제 꼭짓점을 그대로 넘긴다. 반듯하게 펴서 위치 · 회전만 남기는 일은
+        /// 프로젝터 화면 쪽에서 한다(→ ArUcoProjectionView.TryFlattenPlane) — 카메라 쪽에서 펴 봐야
+        /// 카메라 → 프로젝터 변환을 거치며 다시 사다리꼴이 되기 때문이다.
         /// </summary>
         ArUcoHomography BuildMarkerPlane(ArUcoMarkerTracker.TrackedMarker marker)
         {
-            if (_config.perspectiveMapping)
-            {
-                // 실제로 찍힌 네 꼭짓점을 그대로 쓴다 → 원근이 살아난다.
-                return ArUcoHomography.FromUnitSquare(
-                    marker.corner0, marker.corner1, marker.corner2, marker.corner3);
-            }
-
-            // 회전만 쓰는 모드: 마커를 "화면과 나란한 정사각형" 으로 가정해 원근을 지운다.
-            float half = marker.sizePx * 0.5f;
-            float rad = marker.angleDeg * Mathf.Deg2Rad;
-            Vector2 right = new Vector2(Mathf.Cos(rad), -Mathf.Sin(rad)) * half;
-            Vector2 down = new Vector2(Mathf.Sin(rad), Mathf.Cos(rad)) * half;
-            Vector2 c = marker.center;
-
             return ArUcoHomography.FromUnitSquare(
-                c - right - down, c + right - down, c + right + down, c - right + down);
+                marker.corner0, marker.corner1, marker.corner2, marker.corner3);
         }
 
         // 마커마다 다른 색을 주되 이웃한 ID 끼리 비슷해지지 않도록 황금비로 색상환을 돈다.

@@ -341,8 +341,6 @@ namespace StoryRest.ArUco
                 () => config.maxSimultaneous, v => config.maxSimultaneous = v,
                 "0 = 제한 없음. 세트 하나가 한 번에 띄울 마커 수.");
 
-            ToggleRow(parent, "원근 매핑  perspectiveMapping",
-                () => config.perspectiveMapping, v => config.perspectiveMapping = v);
 
             ToggleRow(parent, "관람 기록  recordViews",
                 () => config.recordViews, v => config.recordViews = v);
