@@ -250,7 +250,7 @@ namespace StoryRest.ArUco.Demo
 
             _view.BeginFrame();
 
-            var style = ArUcoDrawStyle.Default(1f, Vector2.zero, subdivisions, true);
+            var style = ArUcoDrawStyle.Default(1f, Vector2.zero, subdivisions);
             var effect = appear.Effect;
 
             if (_markers.Count > 0 && _appear.TryGet(_markers[0], _clock, out var frame))

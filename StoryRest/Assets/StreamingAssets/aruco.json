@@ -8,7 +8,7 @@
     "perspectiveMapping": false,
     "maxSimultaneous": 0,
     "autoScanIntervalFrames": 0,
-    "maxConcurrentVideos": 4,
+    "maxConcurrentVideos": 8,
     "maxCachedImages": 24,
     "calibrationMarkerIds": [
         107,

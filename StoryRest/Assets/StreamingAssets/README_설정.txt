@@ -67,12 +67,15 @@ keywordwall.json 은 예외로 이 폴더의 것을 바로 읽습니다.
   smoothing              마커 움직임 부드럽기. 0 = 즉시(떨림), 클수록 부드럽지만 늦게 따라옴.
   holdSeconds            마커를 놓친 뒤 콘텐츠를 몇 초 더 그려 둘지 (손이 스칠 때 깜빡임 방지).
   viewMinDwellSeconds    이 시간 이상 잡혀야 관람 1회로 셈.
-  viewResumeGraceSeconds 놓친 뒤 이 시간 안에 돌아오면 같은 관람 · 영상은 멈춘 자리에서 이어서. 넘기면 처음으로.
+  videoResumeGraceSeconds 영상 이어보기 유예. 놓친 뒤 이 시간 안에 돌아오면 영상은 멈춘 자리에서 이어서 · 연출 없이 바로.
+                         넘기면 다음엔 처음부터. 없으면 viewResumeGraceSeconds 값을 따름.
+  viewResumeGraceSeconds 관람 기록 유예. 놓친 뒤 이 시간 안에 돌아오면 같은 관람 1회. 넘기면 그때 기록을 남김.
   recordViews            관람 기록을 파일로 남길지.
+  showEmptyGuide         콘텐츠(video/)가 없는 마커에 "N번 마커 · 콘텐츠가 없습니다" 안내를 띄울지. 설치·점검용, 전시 중엔 false.
   maxSimultaneous        세트 하나가 동시에 띄울 마커 수. 0 = 제한 없음.
   perspectiveMapping     true = 원근까지 맞춤 / false = 회전·크기만 (마커가 작아 심하게 떨릴 때).
   warpSubdivisions       원근 격자 분할 수. 6 이상.
-  maxConcurrentVideos    세트당 동시에 돌릴 영상 수 (기본 4).
+  maxConcurrentVideos    세트당 동시에 돌릴 영상 수 (기본 8).
   maxCachedImages        메모리에 올려 둘 이미지 수 (기본 24).
   appear                 등장 연출. enabled / effect(none·grow·fade·topReveal·spiral·wave) / ring(빛 고리) /
                          recognizeSeconds(읽는 시간) / appearSeconds(등장 시간) / settleSeconds(멈춤 판정) /
@@ -80,6 +83,8 @@ keywordwall.json 은 예외로 이 폴더의 것을 바로 읽습니다.
   manualTargetSize       수동 보정 때 "마커를 여기 놓으세요" 사각형 크기. 편집모드에서 +/- 로 맞춤.
   adjustPositionStep / adjustScaleStep / adjustRotationStep  편집모드에서 키 한 번에 움직이는 양.
   sets[].calibration     카메라↔프로젝터 대응점. 편집모드 보정(F3)이 채웁니다. valid 가 true 여야 투사가 맞습니다.
+                         projectorPoints = 조준 사각형 자리(화면 비율, 위가 0). 수동 보정 중 방향키로 옮깁니다.
+                         보정 단계 Backspace 는 카메라 값만 지우고, Ctrl+Backspace 는 사각형 자리까지 기본값으로 돌립니다.
   sets[].globalScale / globalOffsetX / globalOffsetY   세트 전체 크기·위치 보정.
   sets[].markers[]       마커별 보정(scale, offsetX/Y, rotationOffset, enabled)과 파일별 보정(items[]).
 
@@ -94,13 +99,12 @@ keywordwall.json 은 예외로 이 폴더의 것을 바로 읽습니다.
 이 폴더의 파일을 바로 읽습니다. 파일로 바꾸면 프로그램을 다시 시작해야 합니다.
 
   ※ 시간·속도·크기·투명도 같은 값은 실행 중 ESC 설정창의 "키워드 월" 항목에서 슬라이더로 바꿀 수 있고,
-    바꾸는 즉시 적용되며 이 파일에 저장됩니다. 파일을 직접 고칠 일은 walls[]·색 목록·그라데이션 정도입니다.
-    maxOnScreen(개수)과 폴더 수만 시작할 때 정해져 재시작이 필요합니다.
+    바꾸는 즉시 적용되며 이 파일에 저장됩니다. 파일을 직접 고칠 일은 walls[]·그라데이션·분류 문구 파일 정도입니다.
 
   ※ 자리·크기·글꼴·색·배경은 이 파일에 없습니다. 그것들은 Unity 씬(StartScene 의 StoryRestApp > KeywordWall_A/B)과
     그 원본 프리팹(Assets/9.Prefab/KeywordWall.prefab)이 가지고 있어서, 화면을 보면서 잡고 빌드를 다시 만들어야 바뀝니다.
     walls[] 항목은 씬에 놓인 월에 순서대로 배정됩니다. 한 PC 에서 월이 3개 이상 필요하면 씬에 하나 더 놓아야 합니다.
-    이 파일에 남은 것은 "언제 · 얼마나 · 어느 프로젝터로" 와, 항목마다 다르게 뽑는 범위(글자 크기·색·그라데이션)입니다.
+    이 파일에 남은 것은 "언제 · 얼마나 · 어느 프로젝터로" 와, 항목마다 다르게 뽑는 범위(크기·그라데이션)입니다.
 
   [어느 프로젝터에 띄우나]
   enabled          false 면 월을 만들지 않음.
@@ -109,53 +113,42 @@ keywordwall.json 은 예외로 이 폴더의 것을 바로 읽습니다.
                      1층 all  → 디스플레이 1, 2   (0 은 ArUco 세트)
                      2·3층 wall → 디스플레이 0, 1  (월 PC 에는 세트가 없어 0 부터)
                    세트(aruco.json 의 displayIndex)와 겹치면 시작할 때 경고가 납니다.
+    liveSets       이 화면에 "지금 누군가가 궁금해한 질문" 을 띄울 세트. 관람객이 마주 보는 벽이 되게 정합니다.
+                   기본: 층의 첫 번째 월(오른쪽 벽) = ["A"], 두 번째 월(왼쪽 벽) = ["B"].
+    rank           이 화면에만 뜨는 순위 분류. "month" = 이번 달 호기심 1위(오른쪽 벽), "week" = 이번 주 호기심 1위(왼쪽 벽).
+                   현장 배선이 반대면 두 화면의 liveSets 와 rank 를 서로 바꾸면 됩니다.
 
-  [무엇이 떠다니나]
-  - floor_<N>/<마커ID>/sprite/ 에 그림이 하나라도 있으면 → 그림(스프라이트)이 떠다닙니다.
-  - 하나도 없으면 → floor_<N>/keywords.txt 의 낱말이 떠다닙니다.
-  minSpriteFolders / maxSpriteFolders
-                   그림이 있는 폴더 중 몇 개를 띄울지 (기본 5~10). 켤 때마다 이 범위에서 개수를 뽑고 폴더를 무작위로 고릅니다.
-                   둘 다 0 이면 전부.
-  maxOnScreen      한 화면에 동시에 떠 있는 개수 (기본 16).
-  minSpriteSize / maxSpriteSize   그림 크기 범위 (긴 변, 1920x1200 기준 픽셀). 기본 360~760 — 가로로 긴 글자 이미지 기준.
-  spriteGradients  흰 글씨 이미지에 입힐 그라데이션 목록 [{from, to}, …]. 낱말마다 하나를 무작위로 고릅니다.
-                   비우면 원본 색 그대로. 색 있는 이미지에 쓰면 곱해져 탁해집니다. 카드 그림에도 같이 적용.
+  [무엇이 뜨나] — 규칙은 docs/WALL_CONTENT.md §5
+  한 화면에 질문 2개(각각 위에 분류 문구) + 두 질문의 해시태그 전부(최대 maxTags)가 떠다닙니다.
+  그림 재료:
+    질문      floor_<N>/<마커ID>/question/question.png
+    해시태그  floor_<N>/<마커ID>/sprite/NN_<태그>.png   (전시물 하나의 두 마커 폴더를 합침 · 같은 글자는 하나)
+    분류 문구 StreamingAssets/wall_titles/NN_<문구>.png
+  질문 그림이 없는 전시물은 벽에 나오지 않습니다.
+
+  questions        질문 · 해시태그 벽의 동작.
+    minRotateSeconds / maxRotateSeconds   한 칸의 질문이 머무는 시간(초). 기본 120~180. 두 칸이 시차를 두고 바뀝니다.
+    liveSeconds    "지금 누군가가 궁금해한 질문" 이 머무는 시간. 기본 30.
+    maxTags        한 화면의 해시태그 최대 개수. 두 질문의 태그를 전부 띄우되 이보다 많으면 무작위로 자릅니다. 기본 8.
+    refreshSeconds         관람 기록을 다시 세는 주기.
+    questionScale          질문 그림 크기 배율. 분류 문구도 같은 배율로 따라가 PSD 비율이 유지됩니다.
+    titleScale / titleGap  분류 문구 추가 배율(기본 1)과 질문과의 간격(PSD 값 11px, questionScale 을 따름).
+    titleColor             분류 문구 색. PSD 색 #5D5E5E 그대로. 분류 문구에는 그라데이션을 입히지 않습니다.
+    minTagHeight / maxTagHeight   해시태그 높이 범위(1920x1200 기준 px). 질문보다 작게.
+    minQuestionSpeed / maxQuestionSpeed / questionMotions   질문의 움직임. 읽혀야 하므로 느리게.
+    titleFolder / titles   분류 문구 그림 폴더와 분류별 파일. kind 는 week · month · live · least · random.
+                           파일이 둘 이상이면 뜰 때마다 무작위로 하나.
+  floorGradients   질문 · 해시태그에 입힐 층별 그라데이션 목록. [{floors:[1], gradients:[{from, to}, …]}, …]
+                   PSD 의 층 색(1층 #704976 · 2층 #9B3526 · 3층 #08725D)을 기준으로 잡았습니다. 목록을 늘리면 그만큼 다양해집니다.
+                   이 층 목록이 없으면 흰색 그대로.
+  gradientPick     "random" = 항목마다 목록에서 무작위, "first" = 첫 번째로 고정. ESC 설정창의 '그라데이션 무작위'와 같은 값.
   spriteGradientAngle  그라데이션 방향(도). 0 = 왼쪽→오른쪽, 90 = 위→아래.
-  minFontSize / maxFontSize       낱말 글자 크기 범위.
-  minSpeed / maxSpeed             이동 속도. 화면 전체를 0~1 로 본 초당 이동량.
-  minAlpha / maxAlpha             투명도 범위.
-  minLifetime / maxLifetime       하나가 머무는 시간(초). 지나면 사라지고 다른 것이 나옵니다.
-  fadeSeconds      나타나고 사라지는 시간.
-  motions          움직임 종류. Drift(직선) Wave(물결) Orbit(궤도) Bob(제자리) Zigzag(지그재그). 지우면 그 움직임은 안 씀.
-  colors           낱말 색 목록 (#RRGGBB). 그림에는 적용되지 않습니다.
-  avoidDuplicates  같은 것이 화면에 두 개 뜨지 않게.
-  separation / separationPadding  서로 겹쳤을 때 밀어내는 세기와 여백.
+  minSpeed / maxSpeed             해시태그 이동 속도. 화면 전체를 0~1 로 본 초당 이동량.
+  minAlpha / maxAlpha             해시태그 투명도 범위.
+  fadeSeconds      바뀔 때 나타나고 사라지는 시간.
+  motions          해시태그 움직임 종류. Drift(직선) Wave(물결) Orbit(궤도) Bob(제자리) Zigzag(지그재그).
+  separation / separationPadding  서로 겹쳤을 때 밀어내는 세기와 여백. 큰 질문은 덜 밀리고 해시태그가 비킵니다.
   edgeMargin       화면 가장자리 여백(비율). 렌즈 왜곡이 크거나 모서리가 벽에 걸리면 올립니다.
-
-  [왼쪽 위 주제 카드 — spotlight]
-  네 장이 돌아가며 뜹니다: 오늘의 추천 컨텐츠 · 오늘의 베스트셀러 · 이번주의 베스트셀러 · 이번달의 베스트셀러.
-  카드는 제목 + 그 마커의 sprite/ 첫 그림입니다. 그림이 없는 마커는 카드에 안 나옵니다.
-  인기 = 관람 기록의 횟수 (오늘 / 최근 7일 / 최근 30일). 기록이 없는 기간의 카드는 건너뜁니다.
-  추천 = 그림 있는 폴더 중 날짜로 정해지는 하나 (하루 동안 같음).
-  카드가 뜨기 직전에 그 자리의 낱말·그림이 먼저 비켜나고, 카드가 사라지면 다시 그 자리를 씁니다.
-
-    enabled          false 면 카드 없음.
-    alwaysOn         true 면 카드를 상시 띄움 — 쉬지 않고 cardSeconds 마다 다음 장으로, 한 장뿐이면 그대로. 기본 false.
-                     ESC 설정창의 '추천 카드 상시 노출' 체크박스와 같은 값입니다(거기서 바꾸면 여기에 저장됨).
-    intervalSeconds  카드가 뜨는 간격(초). 한 장이 뜨고 다음 장이 뜰 때까지. 기본 60. alwaysOn 이면 무시.
-    cardSeconds      한 장이 떠 있는 시간. 기본 12.
-    fadeSeconds      뜨고 질 때 페이드 시간.
-    showTopicName    true 면 제목 아래에 폴더 이름의 제목 부분("17_별의일생" → 별의일생)을 한 줄 넣음. 기본 false.
-    refreshSeconds   관람 기록을 다시 세는 주기. 기록이 한 건 적힐 때도 다시 셉니다.
-    recommendLabel / todayLabel / weekLabel / monthLabel   카드 제목 글.
-
-  카드가 놓이는 자리와 크기, 제목 글꼴·글자색은 프리팹의 Spotlight 에 있습니다.
-  카드를 옮기면 떠다니는 것들이 비켜 가는 자리도 따라 움직입니다.
-
-
-4. floor_<N>/keywords.txt — 낱말 목록
---------------------------------------
-한 줄에 하나. # 으로 시작하면 주석. 스프라이트가 없을 때만 쓰입니다. 바꾸면 재시작.
 
 
 5. ESC 설정창 (프로그램 안)
@@ -163,14 +156,17 @@ keywordwall.json 은 예외로 이 폴더의 것을 바로 읽습니다.
 ESC 로 열고 닫습니다. 값을 움직이면 바로 적용되고 1초 뒤 aruco.json 에 저장됩니다.
 
   ArUco — 현장 조절값
-    콘텐츠 유지 · 관람 최소 유지 · 놓침 복귀 유예 · 움직임 부드럽게 · 동시 표시 마커 수 · 원근 매핑 · 관람 기록
+    콘텐츠 유지 · 관람 최소 유지 · 영상 이어보기 유예 · 관람 기록 유예 · 움직임 부드럽게 · 동시 표시 마커 수 · 원근 매핑 · 관람 기록
   등장 연출
     켜기 · 연출 종류 · 빛 고리 · 읽는 시간 · 등장 시간 · 멈춤 판정 · 움직임 기준
+  화면 · 카메라 배정 (aruco.json · keywordwall.json) — 재시작해야 적용
+    테이블 A/B 카메라 · 테이블 A/B 프로젝터 · 월 1/2 프로젝터 · 월 1/2 이 받는 테이블 · 월 1/2 순위 분류
+    디스플레이는 Unity Game 뷰처럼 1 부터 셉니다(디스플레이 1 = 파일 값 0). 이 층 · 역할에서 쓰는 것만 보입니다.
   이 PC 의 층 · 역할 (Setting.json)
-    층 · 역할 — 이 둘만 재시작해야 적용됩니다. 저장은 바로 됩니다.
+    층 · 역할 — 재시작해야 적용됩니다. 저장은 바로 됩니다.
   오른쪽 판: 관람 기록 링크의 연결 상태와 송수신 로그 (2·3층에서 두 PC 가 붙었는지 확인)
 
-  카메라 번호 · 디스플레이 번호 · 세트 구성처럼 한 번 정하면 끝나는 값은 설정창에 없습니다. aruco.json 을 직접 고칩니다.
+  세트 구성(세트 수 · floors · 해상도 등)처럼 한 번 정하면 끝나는 값은 설정창에 없습니다. aruco.json 을 직접 고칩니다.
 
 
 6. 단축키
@@ -195,6 +191,7 @@ ESC 로 열고 닫습니다. 값을 움직이면 바로 적용되고 1초 뒤 ar
     PageUp / PageDown       세트 전체 배율
     Space                   코너 보정 진행 (자동 → 수동 → 점 확정 → 완료)
     + -  (수동 보정 중)     조준 사각형 크기
+    ← → ↑ ↓ (수동 보정 중)  지금 짚을 사각형 자리 옮기기 (네 점 다 잡으면 저장)
     Backspace / Ctrl+Backspace  세트 전체 초기화 / 선택한 대상 초기화
     V  D  P  F5             콘텐츠 표시 · 마커 테두리 · 원근 · 콘텐츠 다시 읽기
     H                       안내판 자리 옮기기

@@ -59,6 +59,15 @@ namespace StoryRest.Stats
         /// </summary>
         public static event Action<DateTime> DayRewritten;
 
+        /// <summary>
+        /// 마커가 관람으로 **세어지는 순간**(minDwell 을 넘긴 때) 메인 스레드에서 발생한다. 파일에는 적지 않는다.
+        /// Recorded 는 관람이 끝나야(놓친 뒤 유예까지) 나므로 월의 "지금 누군가가 궁금해한 질문" 에는 늦다.
+        /// seconds 는 0 이다. 월 PC 에서는 ViewStatsClient 가 받은 now 줄로 같은 이벤트를 낸다.
+        /// </summary>
+        public static event Action<ViewRecord> Started;
+
+        public static void NotifyStarted(in ViewRecord record) => Started?.Invoke(record);
+
         public static string Directory => Path.Combine(Application.persistentDataPath, DirectoryName);
 
         /// <summary>그 날의 기록 파일. 날짜는 관람이 시작된 시각(로컬) 기준이다.</summary>

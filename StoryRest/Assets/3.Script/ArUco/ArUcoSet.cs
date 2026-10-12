@@ -122,7 +122,7 @@ namespace StoryRest.ArUco
             if (config.recordViews)
                 _views = new ArUcoViewCounter(floor, set.name, config.viewMinDwellSeconds, config.viewResumeGraceSeconds);
 
-            _appear = new ArUcoAppearTracker(config.appear) { GraceSeconds = config.viewResumeGraceSeconds };
+            _appear = new ArUcoAppearTracker(config.appear) { GraceSeconds = config.videoResumeGraceSeconds };
 
             // 화면은 프리팹이 들고 있다(→ ARCHITECTURE §3). 세트 프리팹의 뿌리에 이미 붙어 있는 것을 쓴다.
             _view = GetComponent<ArUcoProjectionView>();
@@ -139,7 +139,7 @@ namespace StoryRest.ArUco
             // 영상 슬롯은 세트마다 따로 갖는다. 세트가 둘이면 디코더도 그만큼 늘어나므로
             // maxConcurrentVideos 는 "세트 하나당" 상한이라는 점에 유의한다.
             _library = new ArUcoContentLibrary(
-                transform, config.maxConcurrentVideos, config.viewResumeGraceSeconds);
+                transform, config.maxConcurrentVideos, config.videoResumeGraceSeconds);
 
             // 검출기는 세트마다 별도 인스턴스다. 같은 GameObject 에 둘을 붙일 수 없으므로
             // (DisallowMultipleComponent) 세트가 각자의 GameObject 를 갖는 구조여야 한다.
@@ -187,7 +187,7 @@ namespace StoryRest.ArUco
             if (_tracker == null || _library == null || _config == null) return;
 
             ApplyConfigToTracker();
-            _library.ResumeGraceSeconds = _config.viewResumeGraceSeconds;
+            _library.ResumeGraceSeconds = _config.videoResumeGraceSeconds;
 
             if (_config.recordViews && _views == null)
             {
@@ -208,7 +208,7 @@ namespace StoryRest.ArUco
             if (_appear != null)
             {
                 _appear.Config = _config.appear;
-                _appear.GraceSeconds = _config.viewResumeGraceSeconds;
+                _appear.GraceSeconds = _config.videoResumeGraceSeconds;
             }
         }
 
@@ -329,7 +329,11 @@ namespace StoryRest.ArUco
 
                 var style = ArUcoDrawStyle.Default(
                     _set.globalScale, new Vector2(_set.globalOffsetX, _set.globalOffsetY),
-                    _config.warpSubdivisions, _config.perspectiveMapping);
+                    _config.warpSubdivisions);
+
+                // 위치 · 회전만 마커를 따르고 크기는 고정한다(→ ArUcoConfig.flatMarkerSize).
+                style.flatSide = _config.flatMarkerSize;
+                style.tableAspect = _config.manualTargetAspect;   // 책상 위 정사각형의 프로젝터 픽셀 비율
 
                 // 등장 연출: 움직이는 중·읽는 중이면 콘텐츠 대신 고리만(또는 아무것도) 그린다.
                 var appear = new AppearFrame { drawContent = true, ringT = -1f, appearT = 1f };
@@ -347,6 +351,9 @@ namespace StoryRest.ArUco
 
                 if (entries == null || entries.Count == 0)
                 {
+                    // 안내 모드가 꺼져 있으면(전시 상태) 아무것도 비추지 않는다.
+                    if (!_config.showEmptyGuide) continue;
+
                     // 자리만 잡아 두면 현장에서 "인식은 되는데 콘텐츠가 없다"를 바로 구분할 수 있다.
                     var empty = ArUcoPlacement.Of(markerConfig);
 
@@ -491,7 +498,7 @@ namespace StoryRest.ArUco
             // 격자는 화면 좌표를 직접 쓰므로 세트 공통 배치와 파일별 배치를 적용하지 않는다.
             // 여기서 확인하려는 것은 배치가 아니라 "파일이 제대로 들어갔는지" 다.
             var placement = ArUcoPlacement.Identity;
-            var style = ArUcoDrawStyle.Default(1f, Vector2.zero, _config.warpSubdivisions, false);
+            var style = ArUcoDrawStyle.Default(1f, Vector2.zero, _config.warpSubdivisions);
 
             for (int i = 0; i < _previewEntries.Count; i++)
             {
@@ -536,25 +543,15 @@ namespace StoryRest.ArUco
 
         /// <summary>
         /// 콘텐츠를 얹을 평면을 세운다. 단위 정사각형이 마커 자리에 오도록 맞춘 호모그래피다.
+        ///
+        /// 실제 꼭짓점을 그대로 넘긴다. 반듯하게 펴서 위치 · 회전만 남기는 일은
+        /// 프로젝터 화면 쪽에서 한다(→ ArUcoProjectionView.TryFlattenPlane) — 카메라 쪽에서 펴 봐야
+        /// 카메라 → 프로젝터 변환을 거치며 다시 사다리꼴이 되기 때문이다.
         /// </summary>
         ArUcoHomography BuildMarkerPlane(ArUcoMarkerTracker.TrackedMarker marker)
         {
-            if (_config.perspectiveMapping)
-            {
-                // 실제로 찍힌 네 꼭짓점을 그대로 쓴다 → 원근이 살아난다.
-                return ArUcoHomography.FromUnitSquare(
-                    marker.corner0, marker.corner1, marker.corner2, marker.corner3);
-            }
-
-            // 회전만 쓰는 모드: 마커를 "화면과 나란한 정사각형" 으로 가정해 원근을 지운다.
-            float half = marker.sizePx * 0.5f;
-            float rad = marker.angleDeg * Mathf.Deg2Rad;
-            Vector2 right = new Vector2(Mathf.Cos(rad), -Mathf.Sin(rad)) * half;
-            Vector2 down = new Vector2(Mathf.Sin(rad), Mathf.Cos(rad)) * half;
-            Vector2 c = marker.center;
-
             return ArUcoHomography.FromUnitSquare(
-                c - right - down, c + right - down, c + right + down, c - right + down);
+                marker.corner0, marker.corner1, marker.corner2, marker.corner3);
         }
 
         // 마커마다 다른 색을 주되 이웃한 ID 끼리 비슷해지지 않도록 황금비로 색상환을 돈다.

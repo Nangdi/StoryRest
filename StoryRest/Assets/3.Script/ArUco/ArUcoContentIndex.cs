@@ -14,18 +14,6 @@ namespace StoryRest.ArUco
         Image,
     }
 
-    /// <summary>키워드 월에 띄울 그림을 가진 마커 폴더 하나(&lt;ID&gt;/sprite/*). 그림이 없는 폴더는 만들지 않는다.</summary>
-    public class SpriteFolder
-    {
-        public int markerId;
-
-        /// <summary>실제 폴더 이름("17_별의일생"). 로그에서 어느 폴더가 뽑혔는지 읽을 수 있게 둔다.</summary>
-        public string folderName;
-
-        /// <summary>그림 파일의 절대 경로, 이름순.</summary>
-        public List<string> files;
-    }
-
     /// <summary>마커 폴더 안의 파일 한 개.</summary>
     public class ContentEntry
     {
@@ -54,7 +42,7 @@ namespace StoryRest.ArUco
     ///
     /// 마커 폴더 안은 두 칸으로 나뉜다(→ SPEC §4).
     ///   video/  — 마커 위에 투사하는 영상·이미지. 이 표에 오르는 것은 이것뿐이다.
-    ///   sprite/ — 키워드 월에 떠다니는 그림. 마커 투사와 무관하며 ScanSprites 가 따로 모은다.
+    ///   sprite/ — 키워드 월에 떠다니는 해시태그. 마커 투사와 무관하며 WallQuestionCatalog 가 따로 모은다.
     ///
     /// video/ 안의 영상·이미지를 **전부** 등록한다. 한 마커가 영상과 이미지를 함께 띄운다.
     /// 여기서는 경로만 찾는다. 실제 표시는 ArUcoContentLibrary(영상)와 ArUcoImageCache(이미지)가 맡는다.
@@ -245,70 +233,8 @@ namespace StoryRest.ArUco
         }
 
         /// <summary>
-        /// 층 폴더 전체에서 키워드 월에 띄울 그림(&lt;ID&gt;/sprite/*)을 **마커 폴더 단위로** 모은다.
-        /// 그림이 없는 폴더는 목록에 오르지 않는다. 마커 ID 순 · 파일 이름순이라 실행할 때마다 순서가 같다.
-        ///
-        /// 폴더 단위로 돌려주는 이유 — 층에 폴더가 100개면 그림을 전부 띄우기엔 너무 많아, 월은 그중 몇 폴더만
-        /// 무작위로 골라 띄운다(→ KeywordWallConfig.minSpriteFolders). 고르는 단위가 "마커 하나의 그림 묶음" 이다.
-        ///
-        /// 마커 표(Rescan)와 따로 둔 이유 — 월 PC(role=wall)는 마커 표를 만들지 않지만 스프라이트는 필요하다.
-        /// 그림이 하나도 없으면 빈 목록이다(낱말로 대신한다 → SPEC §3.1).
-        /// </summary>
-        public static List<SpriteFolder> ScanSprites(string contentRoot)
-        {
-            var folders = new List<SpriteFolder>();
-
-            if (string.IsNullOrEmpty(contentRoot) || !Directory.Exists(contentRoot)) return folders;
-
-            string[] directories;
-            try
-            {
-                directories = Directory.GetDirectories(contentRoot);
-            }
-            catch (Exception e)
-            {
-                Debug.LogWarning($"[ArUco] 콘텐츠 폴더를 읽지 못했습니다: {contentRoot}\n{e.Message}");
-                return folders;
-            }
-
-            // "17" 과 "17_별의일생" 이 함께 있어도 그림은 둘 다 후보에 든다. 어느 폴더 것인지는 월에서 의미가 없다.
-            var ordered = new List<(int id, string directory)>();
-            foreach (string directory in directories)
-            {
-                if (TryParseMarkerId(new DirectoryInfo(directory).Name, out int markerId))
-                    ordered.Add((markerId, directory));
-            }
-            ordered.Sort((a, b) => a.id != b.id
-                ? a.id.CompareTo(b.id)
-                : StringComparer.OrdinalIgnoreCase.Compare(a.directory, b.directory));
-
-            foreach (var (id, directory) in ordered)
-            {
-                string spriteDirectory = Path.Combine(directory, SpriteFolder);
-                if (!Directory.Exists(spriteDirectory)) continue;
-
-                var files = new List<string>();
-                foreach (string file in ListFiles(spriteDirectory))
-                {
-                    if (IsImageFile(file)) files.Add(file);
-                }
-
-                if (files.Count == 0) continue;
-
-                folders.Add(new SpriteFolder
-                {
-                    markerId = id,
-                    folderName = new DirectoryInfo(directory).Name,
-                    files = files,
-                });
-            }
-
-            return folders;
-        }
-
-        /// <summary>
         /// 층 폴더의 번호 폴더 전부를 "마커 ID → 폴더 이름" 으로 돌려준다. 콘텐츠 유무는 보지 않는다.
-        /// 월의 주제 카드가 주제 이름("17_별의일생" → "별의일생")을 여기서 얻는다 — 월 PC 는 마커 표(Rescan)를 만들지 않으므로
+        /// 월의 질문 목록(WallQuestionCatalog)이 여기서 폴더를 찾는다 — 월 PC 는 마커 표(Rescan)를 만들지 않으므로
         /// GetFolderName 을 쓸 수 없다. 같은 ID 폴더가 둘이면 이름순 첫 번째(Rescan 과 같은 규칙).
         /// </summary>
         public static Dictionary<int, string> ScanFolderNames(string contentRoot)

@@ -81,6 +81,9 @@ namespace StoryRest.ArUco
 
         public Camera OutputCamera => _camera;
 
+        /// <summary>지금 쓰고 있는 카메라 → 프로젝터 변환. 편집모드가 보정 결과를 눈으로 확인시키는 데 쓴다.</summary>
+        public ArUcoProjection Projection => _projection;
+
         /// <summary>이 세트가 그리는 화면의 픽셀 크기. 디스플레이 해상도(또는 에디터 분할 뷰포트)를 따른다.</summary>
         public Vector2 CanvasSize => _canvasRect != null ? _canvasRect.rect.size : Vector2.zero;
 
@@ -191,7 +194,9 @@ namespace StoryRest.ArUco
             ArUcoAppearTracker.Ring(t, out float scale, out float alpha);
             if (alpha <= 0.001f) return;
 
-            var ringStyle = ArUcoDrawStyle.Default(1f, Vector2.zero, 4, style.perspective);
+            var ringStyle = ArUcoDrawStyle.Default(1f, Vector2.zero, 4);
+            ringStyle.flatSide = style.flatSide;   // 고리도 콘텐츠와 같은 고정 크기 · 책상 비율 기준
+            ringStyle.tableAspect = style.tableAspect;
             var placement = ArUcoPlacement.Identity;
             placement.scale = scale;
 
@@ -363,15 +368,19 @@ namespace StoryRest.ArUco
         /// </summary>
         /// <param name="sizeNormalized">화면 짧은 변을 1 로 보는 크기</param>
         public void DrawOverlay(Vector2 projectorPoint, float sizeNormalized, Texture texture, Color tint)
+            => DrawOverlay(projectorPoint, new Vector2(sizeNormalized, sizeNormalized), texture, tint);
+
+        /// <param name="sizeNormalized">가로 · 세로 크기. 둘 다 화면 짧은 변을 1 로 본다</param>
+        public void DrawOverlay(Vector2 projectorPoint, Vector2 sizeNormalized, Texture texture, Color tint)
         {
             var quad = GetOverlay(_overlayUsed);
             Vector2 canvasSize = _canvasRect.rect.size;
 
-            float side = sizeNormalized * Mathf.Min(canvasSize.x, canvasSize.y);
+            float unit = Mathf.Min(canvasSize.x, canvasSize.y);
 
             quad.texture = texture;
             quad.color = tint;
-            quad.rectTransform.sizeDelta = new Vector2(side, side);
+            quad.rectTransform.sizeDelta = sizeNormalized * unit;
             quad.rectTransform.anchoredPosition = new Vector2(
                 (projectorPoint.x - 0.5f) * canvasSize.x,
                 (0.5f - projectorPoint.y) * canvasSize.y);
@@ -407,18 +416,20 @@ namespace StoryRest.ArUco
         {
             if (!plane.IsValid) return false;
 
+            Vector2 canvasSize = _canvasRect.rect.size;
+
+            // 콘텐츠는 늘 프로젝터 화면 위의 반듯한 직사각형(원본 비율, 고정 크기)으로 그린다.
+            // 마커에서는 위치와 회전만 가져온다 — 원근 · 사다리꼴 · 늘어남은 없다(2026-10-06, 현장 판단).
+            // 평면을 카메라 쪽에서 반듯하게 만들어 봐야 카메라 → 프로젝터 변환을 거치며 찌그러지므로,
+            // 프로젝터 화면 쪽으로 옮긴 뒤에 반듯하게 편다.
+            if (!TryFlattenPlane(plane, canvasSize, style, out plane)) return false;
+
             // 마커 한 변을 1 로 보는 상대 크기라 카메라 거리가 바뀌어도 값이 유지된다.
             float halfWidth = 0.5f * style.globalScale * placement.scale + margin;
             float halfHeight = halfWidth * style.aspect + margin;
 
-            // 원근이 없으면 사각형 한 장으로도 정확하다. 쪼갤 이유가 없다 — 물결 연출만은 격자가 있어야 보인다.
-            _gridDivisions = style.perspective || style.wave > 0f ? Mathf.Clamp(style.subdivisions, 1, 32) : 1;
-
-            float rad = placement.rotationOffset * Mathf.Deg2Rad;
-            float cos = Mathf.Cos(rad);
-            float sin = Mathf.Sin(rad);
-
-            Vector2 canvasSize = _canvasRect.rect.size;
+            // 반듯한 사각형이라 한 장으로 정확하다. 물결 연출만은 격자가 있어야 보인다.
+            _gridDivisions = style.wave > 0f ? Mathf.Clamp(style.subdivisions, 1, 32) : 1;
 
             _nodes.Clear();
 
@@ -442,24 +453,103 @@ namespace StoryRest.ArUco
                     // 세트 공통 위치는 개별 회전 뒤에 더한다. 마커별 offset 과 같은 좌표계에 있어야
                     // "전체를 밀어 둔 자리에서 이 마커만 조금 더" 가 예상대로 동작한다.
                     // 파일별 offset 도 같은 이유로 마커 offset 에 그냥 더해 둔 상태로 들어온다.
-                    float rx = px * cos - wy * sin + placement.offsetX + style.globalOffset.x;
-                    float ry = px * sin + wy * cos + placement.offsetY + style.globalOffset.y;
+                    // 사람이 맞추는 것은 위치와 크기뿐이다. 회전은 마커를 따른다(평면이 이미 마커 방향으로 돌아 있다).
+                    float rx = px + placement.offsetX + style.globalOffset.x;
+                    float ry = wy + placement.offsetY + style.globalOffset.y;
 
                     // 마커 중심이 (0.5, 0.5), 한 변이 1. v 는 아래로 증가하므로 y 부호를 뒤집는다.
                     if (!plane.TryMap(new Vector2(0.5f + rx, 0.5f - ry), out Vector2 cameraPixel))
                         return false;
 
-                    if (!_projection.TryMap(cameraPixel, out Vector2 projector))
-                        return false;
-
-                    // 프로젝터 정규화(좌상단 원점, y 아래로) → 캔버스 로컬(중심 원점, y 위로)
+                    // 편 평면은 이미 프로젝터 픽셀(좌상단 원점, y 아래로)이다 → 캔버스 로컬(중심 원점, y 위로)
                     _nodes.Add(new Vector2(
-                        (projector.x - 0.5f) * canvasSize.x,
-                        (0.5f - projector.y) * canvasSize.y));
+                        cameraPixel.x - canvasSize.x * 0.5f,
+                        canvasSize.y * 0.5f - cameraPixel.y));
                 }
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// 카메라에 찍힌 마커 평면을 프로젝터 픽셀 위의 반듯한 정사각형 평면으로 바꾼다.
+        ///
+        /// 마커 중심과 네 꼭짓점을 보정 변환으로 프로젝터에 옮긴 뒤 **중심(위치)과 윗변 방향(회전)만** 가져온다.
+        /// 한 변 길이는 고정값(fixedSide)을 쓴다 — 영상 크기와 모양은 마커가 어디 있든 늘 같다.
+        /// 결과는 회전 + 고정 크기뿐인 평면이라 그 위에 놓인 콘텐츠는 원본 가로세로 비율의 직사각형으로 그려진다.
+        /// 좌표는 프로젝터 픽셀(좌상단 원점, y 아래로) — 카메라 픽셀과 같은 방향이다.
+        ///
+        /// 모양은 **책상 위** 기준으로 잡는다. 프로젝터 픽셀을 그대로 쓰면, 비스듬한 투사로 픽셀이 책상 위에서
+        /// 정사각형이 아닐 때 영상을 돌릴수록 한쪽으로 늘어난다. 그래서 가로를 tableAspect 로 나눈 "책상 공간" 에서
+        /// 방향과 정사각형을 잡고, 그린 뒤에 다시 프로젝터 픽셀로 돌린다. 길이는 실제로 나가는 화면 픽셀로 잰다.
+        /// </summary>
+        bool TryFlattenPlane(ArUcoHomography cameraPlane, Vector2 canvasSize, ArUcoDrawStyle style, out ArUcoHomography flat)
+        {
+            flat = default;
+
+            Vector2 output = OutputPixelSize(canvasSize);
+            float aspect = style.tableAspect > 0.01f ? style.tableAspect : 1f;
+
+            if (!ToTable(cameraPlane, new Vector2(0.5f, 0.5f), output, aspect, out Vector2 center)) return false;
+            if (!ToTable(cameraPlane, new Vector2(0f, 0f), output, aspect, out Vector2 q0)) return false;
+            if (!ToTable(cameraPlane, new Vector2(1f, 0f), output, aspect, out Vector2 q1)) return false;
+            if (!ToTable(cameraPlane, new Vector2(1f, 1f), output, aspect, out Vector2 q2)) return false;
+            if (!ToTable(cameraPlane, new Vector2(0f, 1f), output, aspect, out Vector2 q3)) return false;
+
+            // 마주 보는 두 변을 평균내 기울기와 크기를 잡는다. 한 변만 쓰면 원근이 걸린 쪽으로 쏠린다.
+            Vector2 across = ((q1 - q0) + (q2 - q3)) * 0.5f;
+            Vector2 down = ((q3 - q0) + (q2 - q1)) * 0.5f;
+
+            float measured = (across.magnitude + down.magnitude) * 0.5f;
+            if (measured < 1e-3f) return false;   // 방향을 잡을 수 없을 만큼 찌그러졌다
+
+            // 크기는 마커와 무관한 고정값. 마커가 크게 찍히든 작게 찍히든 같다.
+            float side = style.flatSide > 0f ? style.flatSide * Mathf.Min(output.x, output.y) : measured;
+
+            // 마커에서 가져오는 것은 방향뿐이다. 마커의 가로세로 비율(카메라 원근으로 납작하게 찍힌 정도)은 쓰지 않는다.
+            // 가로 변 방향과 세로 변을 90° 돌린 방향을 평균낸다 — 한쪽 변만 보면 마커가 비스듬히(평행사변형으로)
+            // 찍혔을 때 그쪽으로 각도가 치우친다.
+            Vector2 a = across.normalized;
+            Vector2 d = down.normalized;
+            float handed = a.x * d.y - a.y * d.x >= 0f ? 1f : -1f;   // 거울상이 되지 않게 원래 손잡이 방향을 따른다
+            Vector2 fromDown = handed > 0f ? new Vector2(d.y, -d.x) : new Vector2(-d.y, d.x);
+
+            Vector2 ux = (a + fromDown).normalized;
+            if (ux.sqrMagnitude < 1e-6f) ux = a;
+            Vector2 uy = new Vector2(-ux.y, ux.x) * handed;
+
+            Vector2 hx = ux * (side * 0.5f);
+            Vector2 hy = uy * (side * 0.5f);
+
+            // 책상 공간 → 캔버스 픽셀(좌상단 원점, y 아래로). 둘 다 선형이라 네 꼭짓점만 옮기면 된다.
+            Vector2 toCanvas = new Vector2(aspect * canvasSize.x / output.x, canvasSize.y / output.y);
+
+            flat = ArUcoHomography.FromUnitSquare(
+                Vector2.Scale(center - hx - hy, toCanvas), Vector2.Scale(center + hx - hy, toCanvas),
+                Vector2.Scale(center + hx + hy, toCanvas), Vector2.Scale(center - hx + hy, toCanvas));
+            return flat.IsValid;
+        }
+
+        /// <summary>마커 평면 위 한 점 → 책상 공간(실제 출력 픽셀에서 가로를 tableAspect 로 나눈 것).</summary>
+        bool ToTable(ArUcoHomography cameraPlane, Vector2 uv, Vector2 output, float aspect, out Vector2 table)
+        {
+            table = Vector2.zero;
+            if (!cameraPlane.TryMap(uv, out Vector2 cameraPixel)) return false;
+            if (!_projection.TryMap(cameraPixel, out Vector2 projector)) return false;
+
+            table = new Vector2(projector.x * output.x / aspect, projector.y * output.y);
+            return true;
+        }
+
+        /// <summary>
+        /// 이 세트가 실제로 내보내는 화면 픽셀 수. 캔버스 크기와 보통 같지만, 보조 디스플레이에서 캔버스가
+        /// 다른 해상도로 잡히면 캔버스 단위로 그린 정사각형이 화면에서 늘어난다. 그래서 길이는 이걸로 잰다.
+        /// </summary>
+        Vector2 OutputPixelSize(Vector2 canvasSize)
+        {
+            if (_camera != null && _camera.pixelWidth > 0 && _camera.pixelHeight > 0)
+                return new Vector2(_camera.pixelWidth, _camera.pixelHeight);
+            return canvasSize;
         }
 
         ArUcoWarpedImage GetView(int index)
@@ -505,7 +595,15 @@ namespace StoryRest.ArUco
         public Vector2 globalOffset;
 
         public int subdivisions;
-        public bool perspective;
+
+        // 원근을 껐을 때 마커 한 변으로 칠 고정 길이(화면 짧은 변 = 1). 0 이면 투사된 마커 크기를 그대로 쓴다
+        // (카메라 없이 늘어놓는 디버그 격자처럼 평면 크기가 곧 그릴 크기인 경우).
+        public float flatSide;
+
+        // 책상 위에서 정사각형인 것이 프로젝터 픽셀로는 가로 / 세로 몇 대 몇인지(→ ArUcoConfig.manualTargetAspect).
+        // 프로젝터가 비스듬히 비추면 프로젝터 픽셀이 책상 위에서 정사각형이 아니다. 이 비율을 모르고 픽셀에서
+        // 정사각형을 그리면 영상을 돌릴 때마다 한쪽으로 늘어나 찌그러져 보인다. 1 이면 보정하지 않는다.
+        public float tableAspect;
 
         // ---- 등장 연출(→ ArUcoAppearTracker.Apply) ----
         // 격자 노드를 세로로 흔드는 진폭(콘텐츠 높이 = 1). 0 이면 흔들지 않는다.
@@ -518,7 +616,7 @@ namespace StoryRest.ArUco
         public float spiralTurns;
 
         public static ArUcoDrawStyle Default(float globalScale, Vector2 globalOffset,
-                                             int subdivisions, bool perspective)
+                                             int subdivisions)
         {
             return new ArUcoDrawStyle
             {
@@ -529,7 +627,7 @@ namespace StoryRest.ArUco
                 globalScale = globalScale,
                 globalOffset = globalOffset,
                 subdivisions = subdivisions,
-                perspective = perspective,
+                tableAspect = 1f,
                 wave = 0f,
                 revealMode = RevealMode.None,
                 reveal = 1f,

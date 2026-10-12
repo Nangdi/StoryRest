@@ -131,98 +131,176 @@ namespace StoryRest.ArUco
         {
             if (AppSettings.HasArUco(_app.RunningRole)) BuildArUcoRows(parent);
             if (AppSettings.HasWall(_app.RunningRole)) BuildKeywordRows(parent);
+            BuildAssignmentRows(parent);
             BuildSettingRows(parent);
         }
 
-        // 키워드 월(→ keywordwall.json). 살아 있는 월이 같은 설정 객체를 보고 있어 바꾸는 즉시 따라온다 —
-        // 시간·속도는 매 프레임, 크기·수명·투명도는 다음에 태어나는 낱말부터. 개수만 시작할 때 정해져 재시작이 필요하다.
+        // ── 화면 · 카메라 배정 ────────────────────────────────────────────────
+
+        const int MinChoiceCount = 4;   // 장비가 아직 안 꽂혀 있어도 미리 고를 수 있게 최소 이만큼은 보여 준다
+
+        static readonly string[] LiveSetOptions = { "없음", "테이블 A", "테이블 B" };
+        static readonly string[] RankOptions = { "없음", "이번 달 호기심 1위", "이번 주 호기심 1위" };
+
+        /// <summary>
+        /// 어느 테이블(세트)이 어느 카메라 · 프로젝터를 쓰고, 어느 벽(월)이 어느 프로젝터 · 테이블을 받는지 고른다.
+        /// 이 층 · 역할에서 실제로 쓰는 것만 보인다. 카메라 · 디스플레이는 시작할 때 열리므로 재시작해야 적용된다.
+        /// 디스플레이는 Unity 의 Game 뷰처럼 1 부터 센다(디스플레이 1 = 내부 번호 0).
+        /// </summary>
+        void BuildAssignmentRows(Transform parent)
+        {
+            var displays = DisplayOptions();
+            bool any = false;
+
+            if (AppSettings.HasArUco(_app.RunningRole))
+            {
+                var cameras = CameraOptions();
+                foreach (var set in _app.Config.SetsForFloor(_app.RunningFloor))
+                {
+                    if (!any) Header(parent, "화면 · 카메라 배정 (바꾸면 재시작해야 적용 · 디스플레이는 1 부터)");
+                    any = true;
+
+                    var target = set;
+                    DropdownRow(parent, $"테이블 {target.name} 카메라  sets.{target.name}.camera.deviceId", cameras,
+                        "이 테이블을 비추는 카메라. 번호는 Windows 가 매긴 장치 순서다.",
+                        () => target.camera.deviceId,
+                        v => { target.camera.deviceId = v; Changed(); });
+
+                    DropdownRow(parent, $"테이블 {target.name} 프로젝터  sets.{target.name}.displayIndex", displays,
+                        "이 테이블 위로 콘텐츠를 쏘는 프로젝터.",
+                        () => target.displayIndex,
+                        v => { target.displayIndex = v; Changed(); });
+                }
+            }
+
+            if (AppSettings.HasWall(_app.RunningRole) && _app.KeywordConfig != null)
+            {
+                var walls = _app.KeywordConfig.WallsFor(_app.RunningFloor, _app.RunningRole);
+                for (int i = 0; i < walls.Count; i++)
+                {
+                    if (!any) Header(parent, "화면 · 카메라 배정 (바꾸면 재시작해야 적용 · 디스플레이는 1 부터)");
+                    any = true;
+
+                    var wall = walls[i];
+                    string label = $"월 {i + 1}";
+
+                    DropdownRow(parent, $"{label} 프로젝터  walls.displayIndex", displays,
+                        "이 벽을 비추는 프로젝터. 테이블 프로젝터와 겹치면 시작할 때 경고한다.",
+                        () => wall.displayIndex,
+                        v => { wall.displayIndex = v; KeywordChanged(); });
+
+                    DropdownRow(parent, $"{label} 이 받는 테이블  walls.liveSets", LiveSetOptions,
+                        "이 테이블에서 찍은 질문이 \"지금 누군가가 궁금해한 질문\" 으로 이 벽에 뜬다. 관람객이 마주 보는 벽으로.",
+                        () => wall.ShowsLiveFrom("A") ? 1 : wall.ShowsLiveFrom("B") ? 2 : 0,
+                        v => { wall.liveSets = v == 1 ? new[] { "A" } : v == 2 ? new[] { "B" } : new string[0]; KeywordChanged(); });
+
+                    DropdownRow(parent, $"{label} 순위 분류  walls.rank", RankOptions,
+                        "이 벽에만 뜨는 순위 분류.",
+                        () => RankIndex(wall.rank),
+                        v => { wall.rank = v == 1 ? "month" : v == 2 ? "week" : ""; KeywordChanged(); });
+                }
+            }
+
+            if (any) Note(parent, "바꾼 값은 바로 파일에 저장되고, 프로그램을 다시 시작하면 적용됩니다.");
+        }
+
+        static int RankIndex(string rank)
+        {
+            if (string.Equals(rank?.Trim(), "month", StringComparison.OrdinalIgnoreCase)) return 1;
+            if (string.Equals(rank?.Trim(), "week", StringComparison.OrdinalIgnoreCase)) return 2;
+            return 0;
+        }
+
+        /// <summary>"카메라 0 — 장치 이름". 꽂혀 있지 않은 번호도 최소 몇 개는 미리 보여 준다.</summary>
+        static string[] CameraOptions()
+        {
+            var devices = WebCamTexture.devices;
+            int count = Mathf.Max(devices.Length, MinChoiceCount);
+            var options = new string[count];
+            for (int i = 0; i < count; i++)
+                options[i] = i < devices.Length ? $"카메라 {i} — {devices[i].name}" : $"카메라 {i} (연결 안 됨)";
+            return options;
+        }
+
+        /// <summary>"디스플레이 1" … 지금 연결된 수보다 많이 보여 주되, 없는 것은 표시한다.</summary>
+        static string[] DisplayOptions()
+        {
+            int connected = Display.displays.Length;
+            int count = Mathf.Max(connected, MinChoiceCount);
+            var options = new string[count];
+            for (int i = 0; i < count; i++)
+                options[i] = i < connected ? $"디스플레이 {i + 1}" : $"디스플레이 {i + 1} (연결 안 됨)";
+            return options;
+        }
+
+        // 키워드 월(→ keywordwall.json). 살아 있는 월 · 디렉터가 같은 설정 객체를 보고 있어 바꾸는 즉시 따라온다 —
+        // 주기 · 시간은 다음 교체부터, 크기 · 투명도 · 움직임은 다음에 나타나는 항목부터.
         void BuildKeywordRows(Transform parent)
         {
             var wall = _app.KeywordConfig;
-            var spot = wall != null ? wall.spotlight : null;
-            if (spot == null) return;
+            var q = wall != null ? wall.questions : null;
+            if (q == null) return;
 
-            Header(parent, "키워드 월 — 추천 카드 (바꾸면 바로 적용 · keywordwall.json 에 저장)");
+            Header(parent, "키워드 월 — 질문 교체 (바꾸면 바로 적용 · keywordwall.json 에 저장)");
 
-            ToggleRow(parent, "추천 카드 상시 노출  spotlight.alwaysOn",
-                () => spot.alwaysOn, v => spot.alwaysOn = v, keyword: true);
+            FloatRow(parent, "질문 머무는 시간 최소  questions.minRotateSeconds", 10f, 600f, 10f, "0",
+                () => q.minRotateSeconds, v => q.minRotateSeconds = Mathf.Min(v, q.maxRotateSeconds),
+                "한 칸의 질문이 바뀌기까지(초). 칸마다 이 범위에서 뽑는다. 다음 교체부터.", keyword: true);
+            FloatRow(parent, "질문 머무는 시간 최대  questions.maxRotateSeconds", 10f, 600f, 10f, "0",
+                () => q.maxRotateSeconds, v => q.maxRotateSeconds = Mathf.Max(v, q.minRotateSeconds), null, keyword: true);
 
-            FloatRow(parent, "카드 뜨는 간격  spotlight.intervalSeconds", 15f, 300f, 5f, "0",
-                () => spot.intervalSeconds, v => spot.intervalSeconds = v,
-                "한 장이 뜨고 다음 장이 뜰 때까지(초). 상시 노출이면 쓰지 않는다.", keyword: true);
+            FloatRow(parent, "지금 누군가 머무는 시간  questions.liveSeconds", 5f, 120f, 5f, "0",
+                () => q.liveSeconds, v => q.liveSeconds = v,
+                "마커가 인식된 질문이 벽에 머무는 시간(초). 떠 있는 동안 들어온 인식은 이 분류를 바꾸지 않는다.", keyword: true);
 
-            FloatRow(parent, "카드 떠 있는 시간  spotlight.cardSeconds", 2f, 60f, 1f, "0",
-                () => spot.cardSeconds,
-                v =>
-                {
-                    spot.cardSeconds = v;
-                    spot.fadeSeconds = Mathf.Min(spot.fadeSeconds, v * 0.5f);
-                },
-                "완전히 보이는 시간(초). 페이드는 이 값의 절반을 넘지 못한다.", keyword: true);
+            IntRow(parent, "해시태그 최대 개수  questions.maxTags", 0, 30,
+                () => q.maxTags, v => q.maxTags = v,
+                "두 질문의 해시태그를 전부 띄우되 이보다 많으면 무작위로 자른다. 다음 교체부터.", applyToSets: false, keyword: true);
 
-            FloatRow(parent, "카드 페이드  spotlight.fadeSeconds", 0f, 3f, 0.1f, "0.0",
-                () => spot.fadeSeconds, v => spot.fadeSeconds = Mathf.Min(v, spot.cardSeconds * 0.5f),
-                "나타나고 사라지는 데 걸리는 시간(초).", keyword: true);
+            Header(parent, "키워드 월 — 색 · 크기 · 움직임");
 
-            ToggleRow(parent, "제목 아래 주제 이름  spotlight.showTopicName",
-                () => spot.showTopicName, v => spot.showTopicName = v, keyword: true);
+            ToggleRow(parent, "그라데이션 무작위  gradientPick",
+                () => wall.PickGradientAtRandom, v => wall.gradientPick = v ? "random" : "first", keyword: true);
 
-            FloatRow(parent, "순위 다시 세는 주기  spotlight.refreshSeconds", 5f, 300f, 5f, "0",
-                () => spot.refreshSeconds, v => spot.refreshSeconds = v,
-                "관람 기록을 다시 읽어 카드 목록을 갱신하는 주기(초). 기록이 한 건 적힐 때도 다시 센다.", keyword: true);
+            FloatRow(parent, "질문 크기  questions.questionScale", 0.3f, 2f, 0.05f, "0.00",
+                () => q.questionScale, v => q.questionScale = v,
+                "질문 그림 원본 크기에 곱하는 배율. 분류 문구도 같은 배율로 따라간다(PSD 비율 유지). 다음에 나타나는 질문부터.", keyword: true);
 
-            Header(parent, "키워드 월 — 떠다니는 낱말·그림");
+            FloatRow(parent, "해시태그 높이 최소  questions.minTagHeight", 16f, 200f, 2f, "0",
+                () => q.minTagHeight, v => q.minTagHeight = Mathf.Min(v, q.maxTagHeight),
+                "1920x1200 기준 픽셀. 질문보다 작게 둔다.", keyword: true);
+            FloatRow(parent, "해시태그 높이 최대  questions.maxTagHeight", 16f, 200f, 2f, "0",
+                () => q.maxTagHeight, v => q.maxTagHeight = Mathf.Max(v, q.minTagHeight), null, keyword: true);
 
-            IntRow(parent, "한 화면 개수  maxOnScreen", 1, 40,
-                () => wall.maxOnScreen, v => wall.maxOnScreen = v,
-                "동시에 떠 있는 개수. 시작할 때 만들어지므로 재시작해야 적용.", applyToSets: false, keyword: true);
+            FloatRow(parent, "질문 속도 최대  questions.maxQuestionSpeed", 0f, 0.05f, 0.001f, "0.000",
+                () => q.maxQuestionSpeed, v => q.maxQuestionSpeed = Mathf.Max(v, q.minQuestionSpeed),
+                "질문이 흐르는 속도(화면 짧은 변 = 1, 초당). 읽혀야 하므로 느리게.", keyword: true);
 
-            FloatRow(parent, "속도 최소  minSpeed", 0.005f, 0.15f, 0.005f, "0.000",
+            FloatRow(parent, "해시태그 속도 최소  minSpeed", 0.005f, 0.15f, 0.005f, "0.000",
                 () => wall.minSpeed, v => wall.minSpeed = Mathf.Min(v, wall.maxSpeed),
-                "화면 짧은 변을 1 로 본 초당 이동량. 다음에 태어나는 것부터.", keyword: true);
-            FloatRow(parent, "속도 최대  maxSpeed", 0.005f, 0.15f, 0.005f, "0.000",
+                "화면 짧은 변을 1 로 본 초당 이동량. 다음에 나타나는 것부터.", keyword: true);
+            FloatRow(parent, "해시태그 속도 최대  maxSpeed", 0.005f, 0.15f, 0.005f, "0.000",
                 () => wall.maxSpeed, v => wall.maxSpeed = Mathf.Max(v, wall.minSpeed), null, keyword: true);
 
-            FloatRow(parent, "투명도 최소  minAlpha", 0f, 1f, 0.05f, "0.00",
+            FloatRow(parent, "해시태그 투명도 최소  minAlpha", 0f, 1f, 0.05f, "0.00",
                 () => wall.minAlpha, v => wall.minAlpha = Mathf.Min(v, wall.maxAlpha),
-                "옅은 것과 진한 것이 섞여야 배경처럼 깔린다.", keyword: true);
-            FloatRow(parent, "투명도 최대  maxAlpha", 0f, 1f, 0.05f, "0.00",
+                "질문 · 분류 문구는 늘 불투명하다.", keyword: true);
+            FloatRow(parent, "해시태그 투명도 최대  maxAlpha", 0f, 1f, 0.05f, "0.00",
                 () => wall.maxAlpha, v => wall.maxAlpha = Mathf.Max(v, wall.minAlpha), null, keyword: true);
-
-            FloatRow(parent, "머무는 시간 최소  minLifetime", 3f, 120f, 1f, "0",
-                () => wall.minLifetime, v => wall.minLifetime = Mathf.Min(v, wall.maxLifetime),
-                "하나가 떠 있는 시간(초). 지나면 사라지고 다른 것이 나온다.", keyword: true);
-            FloatRow(parent, "머무는 시간 최대  maxLifetime", 3f, 120f, 1f, "0",
-                () => wall.maxLifetime, v => wall.maxLifetime = Mathf.Max(v, wall.minLifetime), null, keyword: true);
 
             FloatRow(parent, "나타나고 사라지는 시간  fadeSeconds", 0f, 5f, 0.1f, "0.0",
                 () => wall.fadeSeconds, v => wall.fadeSeconds = v,
-                "카드가 뜨기 이만큼 전에 그 자리의 낱말이 먼저 빠진다.", keyword: true);
-
-            FloatRow(parent, "낱말 글자 최소  minFontSize", 16f, 200f, 2f, "0",
-                () => wall.minFontSize, v => wall.minFontSize = Mathf.Min(v, wall.maxFontSize),
-                "낱말 모드(keywords.txt)일 때. 1920x1200 기준 픽셀.", keyword: true);
-            FloatRow(parent, "낱말 글자 최대  maxFontSize", 16f, 200f, 2f, "0",
-                () => wall.maxFontSize, v => wall.maxFontSize = Mathf.Max(v, wall.minFontSize), null, keyword: true);
-
-            FloatRow(parent, "그림 크기 최소  minSpriteSize", 100f, 1200f, 10f, "0",
-                () => wall.minSpriteSize, v => wall.minSpriteSize = Mathf.Min(v, wall.maxSpriteSize),
-                "스프라이트 모드일 때 긴 변(1920x1200 기준 픽셀).", keyword: true);
-            FloatRow(parent, "그림 크기 최대  maxSpriteSize", 100f, 1200f, 10f, "0",
-                () => wall.maxSpriteSize, v => wall.maxSpriteSize = Mathf.Max(v, wall.minSpriteSize), null, keyword: true);
+                "질문 · 해시태그가 바뀔 때의 교차 페이드(초).", keyword: true);
 
             FloatRow(parent, "서로 밀어내는 세기  separation", 0f, 2f, 0.1f, "0.0",
                 () => wall.separation, v => wall.separation = v,
-                "겹쳤을 때 벌어지는 속도. 0 = 안 밀어냄. 너무 크면 튕기듯 움직인다.", keyword: true);
+                "겹쳤을 때 벌어지는 속도. 0 = 안 밀어냄. 큰 질문은 덜 밀리고 해시태그가 비킨다.", keyword: true);
 
             FloatRow(parent, "가장자리 여백  edgeMargin", 0f, 0.2f, 0.01f, "0.00",
                 () => wall.edgeMargin, v => wall.edgeMargin = v,
                 "화면 비율. 렌즈 왜곡이 크거나 모서리가 벽에 걸리면 올린다.", keyword: true);
 
-            ToggleRow(parent, "같은 것 두 개 안 띄움  avoidDuplicates",
-                () => wall.avoidDuplicates, v => wall.avoidDuplicates = v, keyword: true);
-
-            Note(parent, $"설정 파일: {KeywordWallConfig.Path}   (자리·크기·글꼴은 씬의 KeywordWall_A/B 에서)");
+            Note(parent, $"설정 파일: {KeywordWallConfig.Path}   (어느 벽이 어느 세트 · 순위인지는 walls[].liveSets · rank)");
         }
 
         void BuildArUcoRows(Transform parent)
@@ -239,9 +317,13 @@ namespace StoryRest.ArUco
                 () => config.viewMinDwellSeconds, v => config.viewMinDwellSeconds = v,
                 "이 시간 이상 잡혀야 관람 1회로 센다.");
 
-            FloatRow(parent, "놓침 복귀 유예  viewResumeGraceSeconds", 1f, 60f, 1f, "0",
+            FloatRow(parent, "영상 이어보기 유예  videoResumeGraceSeconds", 1f, 60f, 1f, "0",
+                () => config.videoResumeGraceSeconds, v => config.videoResumeGraceSeconds = Mathf.Max(config.holdSeconds, v),
+                "놓친 뒤 이 시간 안에 돌아오면 영상은 멈춘 자리에서 이어서 · 연출 없이 바로. 넘기면 다음엔 처음부터.");
+
+            FloatRow(parent, "관람 기록 유예  viewResumeGraceSeconds", 1f, 60f, 1f, "0",
                 () => config.viewResumeGraceSeconds, v => config.viewResumeGraceSeconds = Mathf.Max(config.holdSeconds, v),
-                "놓친 뒤 이 시간 안에 돌아오면 같은 관람 · 영상은 멈춘 자리에서 이어서.");
+                "놓친 뒤 이 시간 안에 돌아오면 같은 관람 1회로 센다. 넘기면 그때 한 건을 기록한다(순위 반영도 그만큼 뒤).");
 
             FloatRow(parent, "움직임 부드럽게  smoothing", 0f, 0.95f, 0.05f, "0.00",
                 () => config.smoothing, v => config.smoothing = v,
@@ -259,11 +341,12 @@ namespace StoryRest.ArUco
                 () => config.maxSimultaneous, v => config.maxSimultaneous = v,
                 "0 = 제한 없음. 세트 하나가 한 번에 띄울 마커 수.");
 
-            ToggleRow(parent, "원근 매핑  perspectiveMapping",
-                () => config.perspectiveMapping, v => config.perspectiveMapping = v);
 
             ToggleRow(parent, "관람 기록  recordViews",
                 () => config.recordViews, v => config.recordViews = v);
+
+            ToggleRow(parent, "콘텐츠 없는 마커 안내  showEmptyGuide",
+                () => config.showEmptyGuide, v => config.showEmptyGuide = v);
 
             BuildAppearRows(parent, config);
 

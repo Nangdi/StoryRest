@@ -135,7 +135,7 @@ namespace StoryRest.ArUco
 
         public AppearConfig Config { get; set; }
 
-        /// <summary>목록에서 빠진 뒤 상태를 기억하는 시간(→ ArUcoConfig.viewResumeGraceSeconds).</summary>
+        /// <summary>목록에서 빠진 뒤 상태를 기억하는 시간(→ ArUcoConfig.videoResumeGraceSeconds).</summary>
         public float GraceSeconds { get; set; } = 20f;
 
         public ArUcoAppearTracker(AppearConfig config)

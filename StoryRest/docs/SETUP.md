@@ -54,7 +54,7 @@ AVPro 도 마찬가지로 `Runtime/Plugins/Windows/` 만 있으면 된다.
 | `Assets/StreamingAssets/Setting.json` | `floor` 가 이 PC 가 설치될 층인지, `role` 이 이 PC 의 역할인지(아래 표) — **첫 실행 때 복사되는 기본값**. 실제 값은 아래 참고 |
 | `Assets/StreamingAssets/aruco.json` | 카메라 `deviceId`, `displayIndex`, 세트 개수 — **첫 실행 때 복사되는 기본값**. 실제 값은 아래 참고 |
 | `Assets/StreamingAssets/keywordwall.json` | 키워드 월 `walls[]` 의 디스플레이 번호가 세트와 겹치지 않는지 (`roles` 로 역할별 항목이 나뉘어 있다) |
-| `Assets/StreamingAssets/floor_<N>/` | 마커 ID 폴더(`<ID>/video/` 영상·이미지, `<ID>/sprite/` 월 그림), `keywords.txt` |
+| `Assets/StreamingAssets/floor_<N>/` | 마커 ID 폴더(`<ID>/video/` 영상·이미지, `<ID>/sprite/` 월 해시태그, `<ID>/question/` 월 질문) |
 
 설정 항목 하나하나의 뜻과 ESC 설정창·단축키는 `Assets/StreamingAssets/README_설정.txt` 에 정리되어 있다(빌드에도 같이 들어간다).
 
