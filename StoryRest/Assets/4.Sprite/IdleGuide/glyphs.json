@@ -1,0 +1,130 @@
+{
+ "text": "알아보고 싶은 아카이브 북을 골라 테이블 위에 올려보세요",
+ "fontPx": 46.84,
+ "scale": 2.0,
+ "lineWidth": 1069.5,
+ "bottomCenterY": 957.6,
+ "topCenterY": 152.6,
+ "glyphs": [
+  {
+   "file": "Glyph_01.png",
+   "char": "알",
+   "center": -514.0
+  },
+  {
+   "file": "Glyph_02.png",
+   "char": "아",
+   "center": -472.5
+  },
+  {
+   "file": "Glyph_03.png",
+   "char": "보",
+   "center": -431.0
+  },
+  {
+   "file": "Glyph_04.png",
+   "char": "고",
+   "center": -389.5
+  },
+  {
+   "file": "Glyph_05.png",
+   "char": "싶",
+   "center": -337.5
+  },
+  {
+   "file": "Glyph_06.png",
+   "char": "은",
+   "center": -296.0
+  },
+  {
+   "file": "Glyph_07.png",
+   "char": "아",
+   "center": -244.0
+  },
+  {
+   "file": "Glyph_08.png",
+   "char": "카",
+   "center": -202.5
+  },
+  {
+   "file": "Glyph_09.png",
+   "char": "이",
+   "center": -161.0
+  },
+  {
+   "file": "Glyph_10.png",
+   "char": "브",
+   "center": -119.5
+  },
+  {
+   "file": "Glyph_11.png",
+   "char": "북",
+   "center": -67.5
+  },
+  {
+   "file": "Glyph_12.png",
+   "char": "을",
+   "center": -26.0
+  },
+  {
+   "file": "Glyph_13.png",
+   "char": "골",
+   "center": 26.0
+  },
+  {
+   "file": "Glyph_14.png",
+   "char": "라",
+   "center": 67.5
+  },
+  {
+   "file": "Glyph_15.png",
+   "char": "테",
+   "center": 119.5
+  },
+  {
+   "file": "Glyph_16.png",
+   "char": "이",
+   "center": 161.0
+  },
+  {
+   "file": "Glyph_17.png",
+   "char": "블",
+   "center": 202.5
+  },
+  {
+   "file": "Glyph_18.png",
+   "char": "위",
+   "center": 254.5
+  },
+  {
+   "file": "Glyph_19.png",
+   "char": "에",
+   "center": 296.0
+  },
+  {
+   "file": "Glyph_20.png",
+   "char": "올",
+   "center": 348.0
+  },
+  {
+   "file": "Glyph_21.png",
+   "char": "려",
+   "center": 389.5
+  },
+  {
+   "file": "Glyph_22.png",
+   "char": "보",
+   "center": 431.0
+  },
+  {
+   "file": "Glyph_23.png",
+   "char": "세",
+   "center": 472.5
+  },
+  {
+   "file": "Glyph_24.png",
+   "char": "요",
+   "center": 514.0
+  }
+ ]
+}

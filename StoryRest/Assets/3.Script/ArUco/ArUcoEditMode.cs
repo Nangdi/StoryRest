@@ -234,6 +234,7 @@ namespace StoryRest.ArUco
                 s.SuppressContent = false;
                 s.SuppressViewCounting = active;   // 설치자가 마커를 만지는 것은 관람이 아니다
                 s.SuppressAppear = active;         // 배치를 맞추는 동안 고리·등장을 기다릴 수는 없다
+                s.SuppressIdle = active;           // 대기 안내 문구가 배치 · 보정 화면을 가리지 않게
                 s.HighlightMarkerId = -1;
                 s.HighlightItemIndex = -1;
                 s.View.ShowHud(null);

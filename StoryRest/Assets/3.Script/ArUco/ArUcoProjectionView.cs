@@ -50,6 +50,9 @@ namespace StoryRest.ArUco
         [SerializeField] RectTransform _overlayLayer;   // 조준점 · 투사 마커
         [SerializeField] TMP_Text _statusText;
 
+        [Tooltip("마커가 하나도 없을 때 뜨는 바닥 대기 안내(→ ArUcoIdleGuide). 비워두면 표시하지 않음.")]
+        [SerializeField] ArUcoIdleGuide _idleGuide;
+
         [Header("편집모드 안내판")]
         [SerializeField] RectTransform _hudPanel;
         [SerializeField] TMP_Text _hudText;
@@ -80,6 +83,9 @@ namespace StoryRest.ArUco
         int _gridDivisions;
 
         public Camera OutputCamera => _camera;
+
+        /// <summary>바닥 대기 안내. 프리팹에 없으면 null.</summary>
+        public ArUcoIdleGuide IdleGuide => _idleGuide;
 
         /// <summary>지금 쓰고 있는 카메라 → 프로젝터 변환. 편집모드가 보정 결과를 눈으로 확인시키는 데 쓴다.</summary>
         public ArUcoProjection Projection => _projection;

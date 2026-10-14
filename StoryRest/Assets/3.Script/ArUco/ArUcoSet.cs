@@ -94,6 +94,15 @@ namespace StoryRest.ArUco
         /// </summary>
         public bool SuppressAppear { get; set; }
 
+        /// <summary>
+        /// 켜면 바닥 대기 안내를 띄우지 않는다. 편집모드가 켠다 — 배치 · 보정 화면에 안내 문구가 끼어들면 안 된다.
+        /// </summary>
+        public bool SuppressIdle { get; set; }
+
+        // 마지막으로 마커가 보인 시각. 이로부터 idle.delaySeconds 가 지나면 대기 안내가 뜬다.
+        // 처음에는 마커가 없었던 것으로 보고 곧바로 띄운다.
+        float _lastMarkerTime = float.NegativeInfinity;
+
         /// <summary>편집 중인 마커에 판을 깔아 어느 것을 조정 중인지 보이게 한다. -1 이면 표시 안 함.</summary>
         public int HighlightMarkerId { get; set; } = -1;
 
@@ -135,6 +144,7 @@ namespace StoryRest.ArUco
             }
 
             _view.ShowStatus("카메라를 여는 중입니다...");
+            if (_view.IdleGuide != null) _view.IdleGuide.Setup(floor);
 
             // 영상 슬롯은 세트마다 따로 갖는다. 세트가 둘이면 디코더도 그만큼 늘어나므로
             // maxConcurrentVideos 는 "세트 하나당" 상한이라는 점에 유의한다.
@@ -230,6 +240,12 @@ namespace StoryRest.ArUco
             // Initialize 를 다시 거치기 전까지는 아무것도 하지 않는다.
             if (_tracker == null || _view == null || _library == null || _config == null || _set == null) return;
 
+            Tick();
+            UpdateIdle();
+        }
+
+        void Tick()
+        {
             if (DebugPreview)
             {
                 DrawContentPreview();
@@ -285,6 +301,25 @@ namespace StoryRest.ArUco
 
             // 관람은 전시 상태에서 콘텐츠를 실제로 그린 프레임에서만 센다. 편집모드와 디버그 격자에서는 세지 않는다.
             if (!_suppressViewCounting) _views?.Update(_visibleIds, Time.unscaledTime);
+        }
+
+        /// <summary>
+        /// 이 세트 카메라에 마커가 하나도 없으면(보정용 제외) 잠시 뒤 바닥 대기 안내를 띄운다.
+        /// 콘텐츠가 없는 마커도 마커다 — 책자를 올려 둔 테이블에 "올려보세요" 가 뜨면 안 된다.
+        /// </summary>
+        void UpdateIdle()
+        {
+            var guide = _view.IdleGuide;
+            if (guide == null) return;
+
+            float now = Time.unscaledTime;
+            if (_visibleIds.Count > 0) _lastMarkerTime = now;
+
+            var idle = _config.idle;
+            bool show = idle != null && idle.enabled && !SuppressIdle && !DebugPreview
+                        && now - _lastMarkerTime >= idle.delaySeconds;
+
+            guide.SetIdle(show);
         }
 
         void OnDestroy()

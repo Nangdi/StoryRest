@@ -98,6 +98,9 @@ namespace StoryRest.ArUco
             if (_link != null)
                 b.AppendLine($"{k}{_link.ToggleKey}{d}관람 기록 링크 상태 {(_link.IsVisible ? "닫기" : "열기")} — 월 PC 연결 · 마지막 송수신");
 
+            b.AppendLine($"{k}{ScreenTestPattern.ActiveToggleKey}{d}글씨 선명도 점검 {(ScreenTestPattern.IsOn ? "닫기" : "열기")} — " +
+                         "모든 프로젝터에 글자 빼곡 · 크기 사다리 · 1px 패턴");
+
             if (_editMode != null)
             {
                 bool previewOn = false;

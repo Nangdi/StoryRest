@@ -313,6 +313,7 @@ square 98px · plane 6.5px · warp **0.00px**(점 사이 평균 4.9px — 4×4 �
 | `ArUcoContentLibrary` | 경로 → 영상 텍스처. AVPro 플레이어 풀 | **신규** (`ArUcoImageLibrary` 대체) |
 | `ArUcoImageCache` | 경로 → 이미지 텍스처. 비동기 로드 + LRU. 세트 공유 | **신규** |
 | `ArUcoViewCounter` | 마커 관람 판정(유지 시간 · 관람 기록 유예). 세트별 | **신규** |
+| `ArUcoIdleGuide` | 바닥 대기 안내. 마커가 없을 때 세트 화면 가장자리에 문구를 움직여 띄움. 세트 프리팹의 `IdleGuide` 레이어 | **신규** |
 | `ArUcoAppearTracker` (`ArUcoAppear.cs`) | 등장 연출 상태(움직임 → 멈춤 판정 → 읽는 중 → 뜸)와 연출 함수. 세트별 | **신규** |
 | `ViewLog` (`Stats/`) | 관람 건별 CSV append/읽기. `persistentDataPath/stats/`. `Recorded` / `DayRewritten` 이벤트 | **신규** |
 | `ViewStatsServer` (`Stats/`) | role=aruco. TCP 로 대기, 적힌 줄을 그대로 월 PC 에 보냄. `sync` 요청에 하루치 응답 | **신규** |
@@ -399,7 +400,7 @@ canvas.planeDistance = 1f;
     항목의 **위치만은** 코드가 매 프레임 계산하므로 앵커·피벗은 가운데로 고정한다.
 - **ArUco 세트**(`ArUcoSet.prefab`) — 뿌리에 `ArUcoSet` · `ArUcoProjectionView` · `ArUcoMarkerTracker` 가 붙어 있고,
   그 아래 카메라 · 캔버스 · 레이어가 들어 있다. 씬에 인스턴스 둘(`ArUcoSet_A/B`)이 놓여 있다.
-  - 레이어가 **자식 순서로 보인다**: `CameraPreview < Highlight < Rings < Content < Labels < Overlays < Status < EditHud`.
+  - 레이어가 **자식 순서로 보인다**: `CameraPreview < Highlight < Rings < Content < IdleGuide < Labels < Overlays < Status < EditHud`.
     예전에는 판이 늘 때마다 라벨 레이어를 맨 뒤로 옮겨 순서를 지켰는데, 이제 부모가 순서를 정한다.
   - 판 · 라벨 · 조준점은 `Templates` 아래 원본을 복제해 만든다. 개수가 마커 수에 달렸기 때문이다.
   - **콘텐츠가 놓이는 자리는 에디터에서 못 잡는다** — 카메라가 읽은 마커 평면과 호모그래피가 정한다(→ §1).
@@ -497,6 +498,8 @@ ArUco PC 한 대가 세트 2개를 도는 구성에서 가장 크게 절약되�
     "revealSoft": 0.12, "spiralTurns": 2.0
   },
 
+  "idle": { "enabled": true, "delaySeconds": 3.0 },
+
   "sets": [
     {
       "name": "A",
@@ -579,6 +582,7 @@ ArUco PC 한 대가 세트 2개를 도는 구성에서 가장 크게 절약되�
 | 관람 기록 | `recordViews` | 즉시 |
 | 등장 연출 켜기 / 연출 / 빛 고리 | `appear.enabled` / `appear.effect`(드롭다운) / `appear.ring` | 즉시 |
 | 읽는 시간 / 등장 시간 / 멈춤 판정 / 움직임 기준 | `appear.recognizeSeconds` / `appearSeconds` / `settleSeconds` / `moveThreshold` | 즉시 |
+| 대기 안내 켜기 / 대기까지 | `idle.enabled` / `idle.delaySeconds` | 즉시 |
 | 이 PC 의 층 | `Setting.json` `floor` | 드롭다운(1~3층). **재시작 후** (고르면 바로 저장하고 안내) |
 | 이 PC 의 역할 | `Setting.json` `role` | 드롭다운(all / aruco / wall). **재시작 후**. 링크 주소(statsHost/Port)는 표시만 |
 
@@ -777,6 +781,25 @@ UV 기준 마스크만 얹었으므로 워프된 상태에서도 콘텐츠 기�
 `X` 마커 놓침, `H` 고리, `T` 기울이기, `L` 자동 반복, `P` 일시정지 + `←/→` 0.05초 스크럽.
 인스펙터의 `appear` 값은 `aruco.json` 의 것과 같은 형식이라 맞춰 보고 그대로 옮기면 된다.
 
+### 바닥 대기 안내 — 마커가 없으면 "아카이브 북을 올려보세요" (`ArUcoIdleGuide.cs`, 2026-10-14)
+
+디자인은 바탕화면 `전북과_스토리쉼터-대기화면_260928.psd`(1920×1080, 층마다 스마트 오브젝트 하나). 같은 문구가 테이블 아래 가장자리와
+위 가장자리(180° 돌림)에 있고, 층마다 색 그라데이션만 다르다.
+
+- **언제** — `ArUcoSet.UpdateIdle` 이 매 프레임 `_visibleIds`(보정용 제외, 콘텐츠 없는 마커 포함)를 본다. 마지막으로 마커가 보인 뒤
+  `idle.delaySeconds`(기본 3초)가 지나면 띄우고, 마커가 하나라도 잡히면(읽는 중 포함) `hideSeconds`(0.35초) 동안 흐려지며 사라진다.
+  세트마다 따로다. 편집모드(`SuppressIdle`) · 디버그 격자(F6)에서는 띄우지 않는다. 카메라가 안 열린 상태에서도 뜬다(관람객에게는 빈 테이블과 같다).
+- **글자** — `Tools/idle_export/export_idle.py` 가 PSD 의 텍스트를 같은 글꼴(Paperlogy-8ExtraBold)로 **음절마다 한 장씩** 2배 크기 흰 글씨로 그린다
+  (`Assets/4.Sprite/IdleGuide/Glyph_NN.png` + 자리 정보 `glyphs.json`). 글자마다 따로 움직여야 해서 한 줄을 한 장으로 굽지 않는다.
+  UI 디자인 소재라 StreamingAssets 가 아니라 Assets 에 둔다. 문구가 바뀌면 스크립트를 다시 돌리고 프리팹의 글자 칸을 다시 만든다.
+- **색** — `KeywordGradientImage`(월과 같은 것)로 칠한다. 한 줄에 걸친 층별 `Gradient`(PSD 아래쪽 문구 다섯 곳에서 읽은 색)를 글자마다
+  그 칸 양 끝 두 색으로 나눠 입혀 줄 전체로는 PSD 처럼 이어진다. 색은 프리팹(`IdleGuide` › `_floorGradients`)에 있다.
+- **움직임** — 한 주기 18초를 되풀이한다. 등장(앞 글자부터 0.06초 간격, 아래에서 솟으며 back-out 으로 커짐) → 머묾(잔물결로 위아래 흔들림,
+  4.5초마다 큰 물결이 앞에서 뒤로 지나가며 글자가 커졌다 돌아옴) → 퇴장(앞 글자부터 작아지며 사라짐) → 0.6초 비운 뒤 다시 등장. 위쪽 줄은 0.25초 늦게 시작한다.
+  시간 · 크기 값은 프리팹 인스펙터에 있다(모양에 속하는 값이라 json 에 두지 않는다).
+- **자리** — `Frame`(1920×1080, PSD 좌표 그대로)을 세트 캔버스에 맞춰 통째로 배율한다. 테이블 영역 보정(§1)과는 무관한 프로젝터 화면 좌표다 —
+  PSD 가 프로젝터 화면 기준으로 그려져 있기 때문이다. 현장에서 자리가 안 맞으면 프리팹의 `Line_Top` / `Line_Bottom` 을 옮긴다.
+
 ---
 
 ## 6. 스레딩과 성능
@@ -898,7 +921,16 @@ UV 기준 마스크만 얹었으므로 워프된 상태에서도 콘텐츠 기�
   밖에서 누르면 모든 세트가 함께 토글되고, 안에서 누르면 선택한 세트만 바뀐다.
   나머지 편집 상태(하이라이트·콘텐츠 숨김·마커 테두리)는 나갈 때 전부 전시 상태로 되돌린다.
 - 편집모드 밖에서 값을 바꾸는 키는 받지 않는다(→ SPEC §6). `C`는 표시 스위치라 예외로 둔다.
-- **편집모드 밖에서도 받는 키 — `F1` `F4` `F6` `F7` `C`.** 전부 표시 스위치라 값을 바꾸지 않는다.
+- **편집모드 밖에서도 받는 키 — `F1` `F4` `F6` `F7` `F8` `C`.** 전부 표시 스위치라 값을 바꾸지 않는다.
+- **`F8` — 글씨 선명도 점검**(`ScreenTestPattern`, 2026-10-14). 현장에서 "투사한 글씨가 흐리다" 의 원인을 가른다.
+  `9.Prefab/ScreenTestPattern.prefab` 이 세트 캔버스(EditHud 바로 아래)와 키워드 월 캔버스(맨 위)에 들어 있어 **모든 프로젝터에 한꺼번에** 뜨고,
+  상태(모드 · 크기 · 글꼴)도 모든 화면이 함께 쓴다. 켜져 있는 동안 `Tab` 모드(글자 빼곡 → 크기 사다리 10~96px → 픽셀 패턴),
+  `↑↓` / `+` `-` 글자 높이(**실제 화면 픽셀**, Shift 10배), `F` 글꼴(Paperlogy-5Medium · NotoSansKR Regular · Bold), `I` 안내판 숨기기.
+  픽셀 패턴은 출력 해상도와 같은 크기 텍스처를 점 필터로 깔아 1 · 2 · 4px 세로줄 · 가로줄 · 체커를 화면 픽셀과 1:1 로 찍는다.
+  안내판에는 이 화면 출력 · Windows 해상도(`Display.systemWidth`) · Unity 렌더 해상도 · 캔버스 배율이 뜨고, 렌더와 Windows 해상도가 다르면 빨갛게 경고한다.
+  판단: **1px 줄이 번지면** 프로젝터 · 케이블 · Windows(초점, 키스톤 · 디지털 줌, 프로젝터 기본 해상도가 아닌 입력, 배율) /
+  **줄은 또렷한데 글자만 흐리면** Unity 글자 그리기 / **둘 다 또렷한데 영상 속 글씨만 흐리면** 영상 파일 해상도 · 인코딩.
+  편집모드와 키(방향키 · Tab)가 겹쳐 편집모드 중에는 열리지 않고, 편집모드에 들어가면 닫힌다.
 - **`F1` — 단축키 안내**(`ArUcoHelpPanel`). 이 표를 화면에 띄운다. 키 이름은 각 컴포넌트의
   필드에서 읽어 오므로 인스펙터에서 키를 바꿔도 안내가 따라온다. 편집모드 안에서는 HUD 가
   화면을 쓰고 있으므로 따로 띄우지 않고 편집모드 HUD 끝에 이어 붙인다.

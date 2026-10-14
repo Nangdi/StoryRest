@@ -350,6 +350,15 @@ namespace StoryRest.ArUco
 
             BuildAppearRows(parent, config);
 
+            Header(parent, "바닥 대기 안내 (idle)");
+
+            ToggleRow(parent, "대기 안내 켜기  idle.enabled",
+                () => config.idle.enabled, v => config.idle.enabled = v);
+
+            FloatRow(parent, "대기까지  idle.delaySeconds", 0f, 30f, 0.5f, "0.0",
+                () => config.idle.delaySeconds, v => config.idle.delaySeconds = v,
+                "테이블에서 마커가 모두 사라진 뒤 \"아카이브 북을 올려보세요\" 가 뜨기까지(초).");
+
             Note(parent, $"설정 파일: {ArUcoConfigIO.Path}");
         }
 
