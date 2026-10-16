@@ -109,3 +109,8 @@ crashlytics-build.properties
 # ArUcoConfigIO 가 저장할 때마다 남기는 직전 설정 백업
 /Assets/StreamingAssets/*.bak
 /Assets/StreamingAssets/*.bak.meta
+
+# CameraTest 씬 테스트 영상 (README 만 올린다)
+/[Aa]ssets/[Ss]treamingAssets/test_video/*
+!/[Aa]ssets/[Ss]treamingAssets/test_video/README.txt
+!/[Aa]ssets/[Ss]treamingAssets/test_video/README.txt.meta
